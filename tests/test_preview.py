@@ -94,6 +94,17 @@ class TestClipWarning:
         assert preview.ink_clipped
         assert any("не напечатается" in w for w in preview.warnings)
 
+    def test_content_that_falls_off_the_sheet_entirely_is_still_reported(self, make_pdf, device):
+        """Самый тяжёлый случай обрезки: содержимое уходит за край бумаги целиком.
+
+        На собранный лист оно тогда вообще не попадает, и по листу потерю не
+        увидеть — поэтому проверять надо растр страницы, а не лист.
+        """
+        path = make_pdf([(A4.size.width * 1.5, A4.size.height * 1.5, 0)])
+        with PdfDocument(path) as document:
+            preview = render(document, PrintJob(scale=ScaleMode.ACTUAL), device)
+        assert preview.ink_clipped
+
     def test_estimated_margins_are_disclosed(self, a4_portrait_pdf, device):
         with PdfDocument(a4_portrait_pdf) as document:
             preview = render(document, PrintJob(), device)

@@ -138,7 +138,7 @@ def render_sheet_side(
 
         printable_px = _px_rect(sheet_geometry.printable, dpi)
         if placement.is_clipped:
-            ink_clipped = _ink_outside(canvas, printable_px)
+            ink_clipped = _ink_lost(raster.image, raster.dest_px, printable_px)
             _fade(canvas, printable_px)
             if ink_clipped:
                 warnings.append(
@@ -148,9 +148,15 @@ def render_sheet_side(
 
     draw = ImageDraw.Draw(canvas)
     if show_margins:
-        printable_px = _px_rect(sheet_geometry.printable, dpi)
-        guide = _CLIP_WARNING if ink_clipped else _MARGIN_GUIDE
-        _dashed_rect(draw, printable_px, guide)
+        left, top, right, bottom = _px_rect(sheet_geometry.printable, dpi)
+        if ink_clipped:
+            # Пунктир — это подсказка «здесь край области печати». Когда за ним
+            # реально теряется документ, подсказки мало: рамка становится
+            # сплошной и заметной, потому что это уже не справка, а
+            # предупреждение.
+            draw.rectangle([(left, top), (right, bottom)], outline=_CLIP_WARNING, width=2)
+        else:
+            _dashed_rect(draw, (left, top, right, bottom), _MARGIN_GUIDE)
     draw.rectangle([(0, 0), (sheet_w - 1, sheet_h - 1)], outline=_PAPER_BORDER)
 
     buffer = io.BytesIO()
@@ -171,22 +177,37 @@ def render_sheet_side(
     )
 
 
-def _ink_outside(canvas: Image.Image, printable_px: tuple[int, int, int, int]) -> bool:
-    """Есть ли изображение за пределами печатаемой области.
+def _ink_lost(page: Image.Image, dest_px: tuple[int, int, int, int], printable_px: tuple[int, int, int, int]) -> bool:
+    """Есть ли изображение в той части страницы, которая не напечатается.
 
-    Разница между «геометрически вылезает» и «реально потеряется» принципиальна:
-    страница A4, напечатанная один к одному, ВСЕГДА вылезает на непечатаемые
-    поля — там просто ничего нет. Ругаться на это каждый раз значит приучить
-    человека не читать предупреждения.
+    Проверяется РАСТР СТРАНИЦЫ, а не собранный лист: содержимое, ушедшее за
+    край бумаги целиком, на лист вообще не попадает, и по листу его потерю не
+    увидеть — а это как раз самый тяжёлый случай обрезки.
+
+    Различать «вылезает» и «теряется изображение» обязательно: страница A4,
+    напечатанная один к одному, ВСЕГДА выходит на непечатаемые поля — там
+    просто ничего нет. Ругаться на это каждый раз значит приучить человека не
+    читать предупреждения.
     """
-    left, top, right, bottom = printable_px
-    strips = (
-        (0, 0, canvas.width, top),
-        (0, bottom, canvas.width, canvas.height),
-        (0, top, left, bottom),
-        (right, top, canvas.width, bottom),
+    left, top, width, height = dest_px
+    # Печатаемая область в координатах самого растра страницы.
+    keep = (
+        max(0, printable_px[0] - left),
+        max(0, printable_px[1] - top),
+        min(page.width, printable_px[2] - left),
+        min(page.height, printable_px[3] - top),
     )
-    return any(_has_ink(canvas, strip) for strip in strips)
+    if keep[2] <= keep[0] or keep[3] <= keep[1]:
+        # Не видно вообще ничего — потеряется всё, что на странице нарисовано.
+        return _has_ink(page, (0, 0, page.width, page.height))
+
+    strips = (
+        (0, 0, page.width, keep[1]),
+        (0, keep[3], page.width, page.height),
+        (0, keep[1], keep[0], keep[3]),
+        (keep[2], keep[1], page.width, keep[3]),
+    )
+    return any(_has_ink(page, strip) for strip in strips)
 
 
 def describe_job(
