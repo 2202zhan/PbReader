@@ -21,7 +21,23 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-UI_DIR = Path(__file__).resolve().parent
+def _ui_dir() -> Path:
+    """Каталог со страницей окна.
+
+    В собранной программе файлы лежат не рядом с модулем, а в каталоге, куда
+    их распаковал PyInstaller (sys._MEIPASS). Проверяем его первым — иначе
+    установленная программа открывала бы пустое окно, хотя из исходников всё
+    работает.
+    """
+    bundled = getattr(sys, "_MEIPASS", None)
+    if bundled:
+        candidate = Path(bundled) / "pbreader" / "ui"
+        if (candidate / "index.html").exists():
+            return candidate
+    return Path(__file__).resolve().parent
+
+
+UI_DIR = _ui_dir()
 INDEX_HTML = UI_DIR / "index.html"
 
 #: Подстановка токена в страницу. Строка нарочно не похожа ни на что, что могло

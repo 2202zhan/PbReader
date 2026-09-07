@@ -264,7 +264,10 @@ def _add_job_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from . import __version__
+
     parser = argparse.ArgumentParser(prog="pbreader", description="Печать PDF и предпросмотр для PrintBox")
+    parser.add_argument("--version", action="version", version=f"PbReader {__version__}")
     parser.add_argument("--config", help="путь к pbreader.json")
     parser.add_argument("--verbose", action="store_true")
     subparsers = parser.add_subparsers(dest="command", required=True)

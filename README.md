@@ -45,6 +45,29 @@ PDF-страницы. Это картинка документа, а не лис
 
 ## Установка
 
+### На аппарат — готовой программой
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\build.ps1
+```
+
+Собирает `dist\PbReader-0.1.0-setup.exe` — обычный установщик: Program Files,
+ярлык в «Пуск», удаление через «Программы и компоненты». Python на аппарате не
+нужен, он внутри. Подробности и что проверить после установки — в
+[`packaging/README.md`](packaging/README.md).
+
+Внутри два файла рядом, с общими библиотеками:
+
+| | |
+|---|---|
+| `PbReader.exe` | **без консоли** — двойной щелчок открывает окно. Чёрное окно консоли поверх интерфейса киоска недопустимо, поэтому вывод идёт в `%LOCALAPPDATA%\PbReader\pbreader.log` |
+| `pbreader.exe` | **консольный** — его запускает основной проект и читает stdout |
+
+Собирать нужно на Windows: PyInstaller кладёт в сборку интерпретатор той
+системы, где его запустили.
+
+### Из исходников
+
 ```bash
 pip install -e .            # ядро: pypdfium2, pillow, requests
 pip install -e ".[windows]" # на аппарате: + pywin32, comtypes
@@ -234,6 +257,7 @@ printers/     опрос драйвера, сборка DEVMODE (Windows)
 output/gdi.py вывод на принтер (Windows)
 service.py    локальный HTTP
 ui/           окно программы: одна страница, без внешних ссылок
+packaging/    сборка в .exe и установщик
 housekeeping.py уборка рабочего каталога
 output/jobs.py  слежение за заданием в очереди печати
 cli.py        команды
@@ -252,7 +276,7 @@ cli.py        команды
 ## Что проверено
 
 ```bash
-pytest        # 171 тест
+pytest        # 190 тестов
 ```
 
 Главный из них — `tests/test_raster.py::TestPreviewMatchesPrint`: собирает
