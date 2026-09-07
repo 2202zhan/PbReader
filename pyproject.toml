@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pbreader"
+version = "0.1.0"
+description = "Печать PDF и достоверный предпросмотр для аппаратов PrintBox"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    # PDFium — движок печати Chrome. Лицензия BSD/Apache: в отличие от MuPDF
+    # (AGPL), не требует ни раскрытия исходников, ни платной лицензии для
+    # коммерческих аппаратов.
+    "pypdfium2>=4.25",
+    "pillow>=10.0",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+windows = [
+    "pywin32>=306",   # принтеры, DEVMODE, DC
+    "comtypes>=1.2",  # конвертация офисных форматов через COM
+]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+pbreader = "pbreader.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["pbreader*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
