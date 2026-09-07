@@ -5,7 +5,12 @@
 JSON в stdin с полями is_color / is_one_side / copy_count / custom_pages /
 tray_bin, так что main.js можно переключить, не трогая фронтенд.
 
-`pbreader serve` — локальный сервис предпросмотра.
+`pbreader serve` — локальный сервис предпросмотра. По умолчанию без окна: его
+поднимает основной проект, и лишний интерфейс там ни к чему. С `--ui` тот же
+сервис отдаёт окно программы, с `--no-ui` — принудительно без него.
+
+`pbreader ui` — то же самое плюс открытое окно: PbReader как отдельная
+программа, чтобы проверять параметры и предпросмотр без основного проекта.
 `pbreader printers` — список принтеров и их лотков (нужен при заведении аппарата:
 номера лотков теперь берутся отсюда, а не вбиваются руками).
 `pbreader preview` — сохранить листы в PNG, чтобы посмотреть глазами без киоска.
@@ -74,6 +79,8 @@ def cmd_print(args: argparse.Namespace, config: Config) -> int:
 
 
 def cmd_serve(args: argparse.Namespace, config: Config) -> int:
+    import threading
+
     from .service import serve
 
     if args.port:
@@ -81,20 +88,45 @@ def cmd_serve(args: argparse.Namespace, config: Config) -> int:
     if args.host:
         config.host = args.host
 
-    service = serve(config)
+    with_ui = bool(getattr(args, "ui", False))
+    service = serve(config, with_ui=with_ui)
+
     # Токен печатаем в stdout одной строкой JSON: main.js читает его при запуске
     # процесса и дальше подставляет в URL предпросмотра.
-    print(json.dumps({"url": service.base_url, "token": service.token}, ensure_ascii=False), flush=True)
-    try:
-        import threading
+    print(
+        json.dumps(
+            {"url": service.base_url, "token": service.token, "ui": with_ui}, ensure_ascii=False
+        ),
+        flush=True,
+    )
 
+    if with_ui and getattr(args, "open", False):
+        from .ui import open_ui
+
+        # Окно получает токен подстановкой на странице, поэтому в адресе его
+        # нет — иначе он остался бы в истории браузера.
+        open_ui(service.base_url, app_mode=not getattr(args, "browser", False),
+                profile_dir=config.work_dir / "ui-profile")
+
+    if with_ui:
+        logger.info("Окно программы: %s", service.base_url)
+    logger.info("Остановка — Ctrl+C")
+
+    try:
         threading.Event().wait()
     except KeyboardInterrupt:
-        pass
+        print()
     finally:
         service.shutdown()
         service.server_close()
     return 0
+
+
+def cmd_ui(args: argparse.Namespace, config: Config) -> int:
+    """PbReader как отдельная программа: сервис плюс открытое окно."""
+    args.ui = True
+    args.open = not args.no_open
+    return cmd_serve(args, config)
 
 
 def cmd_printers(args: argparse.Namespace, config: Config) -> int:
@@ -216,7 +248,20 @@ def build_parser() -> argparse.ArgumentParser:
     server = subparsers.add_parser("serve", help="локальный сервис предпросмотра и печати")
     server.add_argument("--host")
     server.add_argument("--port", type=int)
+    server.add_argument(
+        "--ui", action=argparse.BooleanOptionalAction, default=False,
+        help="отдавать окно программы по адресу сервиса (по умолчанию нет)",
+    )
+    server.add_argument("--open", action="store_true", help="открыть окно сразу (нужен --ui)")
+    server.add_argument("--browser", action="store_true", help="открыть вкладкой браузера, а не окном")
     server.set_defaults(handler=cmd_serve)
+
+    window = subparsers.add_parser("ui", help="открыть PbReader как программу (сервис + окно)")
+    window.add_argument("--host")
+    window.add_argument("--port", type=int)
+    window.add_argument("--no-open", action="store_true", help="не открывать окно, только адрес")
+    window.add_argument("--browser", action="store_true", help="открыть вкладкой браузера, а не окном")
+    window.set_defaults(handler=cmd_ui)
 
     printers = subparsers.add_parser("printers", help="принтеры, лотки и возможности")
     printers.add_argument("--json", action="store_true")

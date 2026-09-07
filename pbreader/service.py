@@ -12,6 +12,14 @@
 открытая в браузере на этом же компьютере, иначе могла бы ими воспользоваться.
 Токен принимается и заголовком `Authorization: Bearer …`, и параметром `?token=`
 — тег `<img>` заголовки задавать не умеет.
+
+С флагом `--ui` тот же сервис отдаёт по адресу `/` собственное окно программы
+(pbreader/ui/index.html) — чтобы PbReader можно было открыть и попробовать
+отдельно, без основного проекта. Страница получает токен подстановкой при
+выдаче, и ИМЕННО ПОЭТОМУ она единственная отдаётся без заголовков CORS: иначе
+страница из интернета, открытая в браузере на этом же компьютере, могла бы её
+прочитать и забрать токен. Остальные методы CORS отдают, но без токена они
+бесполезны.
 """
 
 from __future__ import annotations
@@ -29,6 +37,7 @@ from typing import Any
 
 from .config import Config
 from .document import PdfError, PdfPasswordRequired
+from .ui import render_ui_page
 from .job import PrintJob
 from .preview import DEFAULT_PREVIEW_WIDTH
 from .printers import IS_WINDOWS, PrinterUnavailable, describe, default_printer, list_printers
@@ -40,6 +49,8 @@ _PREVIEW_PATH = re.compile(r"^/sessions/([0-9a-f]{32})/preview/(\d+)$")
 _SESSION_PATH = re.compile(r"^/sessions/([0-9a-f]{32})$")
 _PRINT_PATH = re.compile(r"^/sessions/([0-9a-f]{32})/print$")
 MAX_BODY_BYTES = 1 * 1024 * 1024
+MAX_UPLOAD_BYTES = 512 * 1024 * 1024
+UPLOAD_CHUNK = 256 * 1024
 
 
 class ServiceError(Exception):
@@ -53,9 +64,10 @@ class PrintBoxService(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, with_ui: bool = False) -> None:
         self.config = config
         self.token = config.token or secrets.token_urlsafe(24)
+        self.with_ui = with_ui
         self.sessions = SessionStore(ttl_seconds=config.job_ttl_seconds)
         super().__init__((config.host, config.port), _Handler)
 
@@ -78,16 +90,17 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         logger.debug("%s %s", self.address_string(), format % args)
 
-    def _send(self, status: HTTPStatus, body: bytes, content_type: str) -> None:
+    def _send(self, status: HTTPStatus, body: bytes, content_type: str, cors: bool = True) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         # Предпросмотр меняется при любом изменении параметров, а URL при этом
         # может совпасть — кэшировать нельзя, иначе человек увидит прошлый лист.
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+        if cors:
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Filename")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
@@ -140,9 +153,14 @@ class _Handler(BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(parsed.query)
         try:
             if path == "/health" and method == "GET":
-                return self._json({"status": "ok", "windows": IS_WINDOWS})
+                return self._json({"status": "ok", "windows": IS_WINDOWS, "ui": self.server.with_ui})
+            if path in ("/", "/ui") and method == "GET":
+                return self._ui_page()
 
             self._authorize(query)
+
+            if path == "/upload" and method == "POST":
+                return self._upload()
 
             if path == "/printers" and method == "GET":
                 return self._printers()
@@ -180,6 +198,55 @@ class _Handler(BaseHTTPRequestHandler):
             self._fail(HTTPStatus.INTERNAL_SERVER_ERROR, f"Внутренняя ошибка: {exc}")
 
     # --- обработчики --------------------------------------------------------
+
+    def _ui_page(self) -> None:
+        """Отдаёт окно программы. Единственный ответ без CORS — см. заголовок модуля."""
+        if not self.server.with_ui:
+            raise ServiceError(
+                HTTPStatus.NOT_FOUND,
+                "Интерфейс выключен. Запустите с флагом --ui или командой `pbreader ui`",
+            )
+        page = render_ui_page(self.server.token)
+        self._send(HTTPStatus.OK, page, "text/html; charset=utf-8", cors=False)
+
+    def _upload(self) -> None:
+        """Приём файла со страницы: в браузере есть содержимое файла, но не его путь.
+
+        Тело запроса — сам файл, имя приходит заголовком X-Filename (в
+        процентном кодировании, потому что заголовки HTTP — латиница, а файлы у
+        людей называются по-русски). Multipart тут не нужен: поле ровно одно, а
+        разбор multipart из стандартной библиотеки — лишняя поверхность для
+        ошибок на файле в сотни мегабайт.
+        """
+        from .sources import sanitize_filename
+
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            raise ServiceError(HTTPStatus.BAD_REQUEST, "Пустой файл")
+        if length > MAX_UPLOAD_BYTES:
+            raise ServiceError(
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                f"Файл больше допустимых {MAX_UPLOAD_BYTES // (1024 * 1024)} МБ",
+            )
+
+        raw_name = urllib.parse.unquote(self.headers.get("X-Filename", "") or "document.pdf")
+        target = self.server.config.ensure_work_dir() / f"{secrets.token_hex(4)}-{sanitize_filename(raw_name)}"
+
+        remaining = length
+        with open(target, "wb") as handle:
+            while remaining > 0:
+                chunk = self.rfile.read(min(UPLOAD_CHUNK, remaining))
+                if not chunk:
+                    break
+                handle.write(chunk)
+                remaining -= len(chunk)
+
+        if remaining > 0:
+            target.unlink(missing_ok=True)
+            raise ServiceError(HTTPStatus.BAD_REQUEST, "Передача файла оборвалась")
+
+        logger.info("Принят файл: %s (%.1f МБ)", target.name, length / 1024 / 1024)
+        return self._json({"path": str(target), "name": raw_name, "size": length}, HTTPStatus.CREATED)
 
     def _printers(self) -> None:
         if not IS_WINDOWS:
@@ -252,10 +319,10 @@ class _Handler(BaseHTTPRequestHandler):
         return self._json({"printed": True, **asdict(result)})
 
 
-def serve(config: Config | None = None) -> PrintBoxService:
+def serve(config: Config | None = None, with_ui: bool = False) -> PrintBoxService:
     """Поднимает сервис и возвращает его. Блокировки нет — вызывающий решает сам."""
     config = config or Config.load()
-    service = PrintBoxService(config)
+    service = PrintBoxService(config, with_ui=with_ui)
     thread = threading.Thread(target=service.serve_forever, name="pbreader-http", daemon=True)
     thread.start()
     logger.info("Сервис предпросмотра слушает %s", service.base_url)

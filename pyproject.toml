@@ -30,5 +30,8 @@ pbreader = "pbreader.cli:main"
 [tool.setuptools.packages.find]
 include = ["pbreader*"]
 
+[tool.setuptools.package-data]
+pbreader = ["ui/*.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

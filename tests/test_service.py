@@ -14,14 +14,26 @@ from pbreader.paper import A4
 from pbreader.service import PrintBoxService
 
 
-@pytest.fixture
-def service(tmp_path):
-    config = Config(work_dir=tmp_path / "work", host="127.0.0.1", port=0, token="test-token")
-    server = PrintBoxService(config)
+def _start(tmp_path, with_ui):
     import threading
 
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
+    config = Config(work_dir=tmp_path / "work", host="127.0.0.1", port=0, token="test-token")
+    server = PrintBoxService(config, with_ui=with_ui)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+@pytest.fixture
+def service(tmp_path):
+    server = _start(tmp_path, with_ui=False)
+    yield server
+    server.shutdown()
+    server.server_close()
+
+
+@pytest.fixture
+def ui_service(tmp_path):
+    server = _start(tmp_path, with_ui=True)
     yield server
     server.shutdown()
     server.server_close()
@@ -109,3 +121,59 @@ class TestSessions:
         assert request(service, f"/sessions/{session['session_id']}", "DELETE")["closed"] is True
         with pytest.raises(urllib.error.HTTPError):
             request(service, f"/sessions/{session['session_id']}")
+
+
+class TestUiPage:
+    def test_absent_without_the_flag(self, service):
+        """`serve` без --ui — это режим для основного проекта: окно там лишнее."""
+        with pytest.raises(urllib.error.HTTPError) as error:
+            request(service, "/", token=None)
+        assert error.value.code == 404
+        assert "--ui" in json.loads(error.value.read())["error"]
+
+    def test_served_with_the_flag_and_carries_the_token(self, ui_service):
+        response, payload = request(ui_service, "/", token=None, raw=True)
+        page = payload.decode("utf-8")
+        assert response.headers["Content-Type"].startswith("text/html")
+        assert "test-token" in page
+        assert "__PBREADER_TOKEN__" not in page
+
+    def test_page_is_the_one_response_without_cors(self, ui_service):
+        """Страница несёт токен, поэтому читать её кросс-доменно нельзя.
+
+        Иначе страница из интернета, открытая в браузере на этом же компьютере,
+        забрала бы токен и получила право печатать. Остальные методы CORS
+        отдают — без токена они всё равно бесполезны.
+        """
+        page, _ = request(ui_service, "/", token=None, raw=True)
+        assert page.headers.get("Access-Control-Allow-Origin") is None
+
+        health, _ = request(ui_service, "/health", token=None, raw=True)
+        assert health.headers.get("Access-Control-Allow-Origin") == "*"
+
+    def test_health_reports_whether_the_window_is_available(self, service, ui_service):
+        assert request(service, "/health", token=None)["ui"] is False
+        assert request(ui_service, "/health", token=None)["ui"] is True
+
+
+class TestUpload:
+    def test_file_sent_from_the_page_becomes_a_session(self, ui_service, make_pdf, tmp_path):
+        """В браузере есть содержимое файла, но не его путь — иначе окно не
+        смогло бы открыть ничего, кроме уже лежащего на диске у сервиса."""
+        source = make_pdf([(A4.size.width, A4.size.height, 0)] * 2)
+        url = f"http://127.0.0.1:{ui_service.server_address[1]}/upload"
+        req = urllib.request.Request(url, data=source.read_bytes(), method="POST")
+        req.add_header("Authorization", "Bearer test-token")
+        req.add_header("X-Filename", "%D0%BE%D1%82%D1%87%D1%91%D1%82.pdf")
+        with urllib.request.urlopen(req, timeout=10) as response:
+            uploaded = json.loads(response.read())
+
+        assert uploaded["name"] == "отчёт.pdf"
+        assert uploaded["path"].endswith(".pdf")
+        session = request(ui_service, "/sessions", "POST", {"file": uploaded["path"]})
+        assert session["document"]["page_count"] == 2
+
+    def test_empty_upload_is_rejected(self, ui_service):
+        with pytest.raises(urllib.error.HTTPError) as error:
+            request(ui_service, "/upload", "POST", body=None)
+        assert error.value.code in (400, 411)
