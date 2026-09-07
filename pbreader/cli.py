@@ -64,17 +64,48 @@ def cmd_print(args: argparse.Namespace, config: Config) -> int:
     if not job.printer:
         job = job.with_(printer=config.printer or _system_default_printer())
 
+    # Уборка перед работой: разовый запуск живёт недолго, фонового уборщика у
+    # него нет, а мусор от прошлых заданий копится на диске так же.
+    from .housekeeping import sweep
+
+    sweep(config.work_dir, config.work_file_ttl_hours)
+
     pdf_path = prepare_document(
         str(source), config, token=params.get("device_token", ""), verify_tls=not args.insecure
     )
 
     from .document import PdfDocument
-    from .output import print_document
+    from .output import JobTracker, print_document
 
-    with PdfDocument(pdf_path, password=params.get("password")) as document:
+    password = args.password or params.get("password") or None
+    with PdfDocument(pdf_path, password=password) as document:
         result = print_document(document, job, document_name=params.get("document_name"))
 
-    print(json.dumps({"ok": True, **result.__dict__}, ensure_ascii=False))
+    payload = {"ok": True, **result.__dict__}
+
+    # По умолчанию ЖДЁМ конца печати. Разница принципиальная: «задание принято
+    # спулером» и «бумага вышла» — разные события, и решать по первому, брать
+    # ли с человека деньги, нельзя. С --no-wait поведение прежнее.
+    if result.job_id and not args.no_wait:
+        tracker = JobTracker()
+        tracker.register(result.job_id, result.printer, result.pages_sent, document.path.name)
+        status = tracker.wait(
+            result.job_id,
+            timeout=args.wait_timeout,
+            on_change=lambda s: logger.info(
+                "Задание %d: %s%s (%d/%d стр.)",
+                s.job_id, s.state.value, f" — {s.problem}" if s.problem else "",
+                s.pages_printed, s.total_pages,
+            ),
+        )
+        payload["status"] = status.to_dict()
+        payload["ok"] = status.state.value == "printed"
+        if not payload["ok"]:
+            payload["error"] = status.problem or f"задание завершилось со статусом «{status.state.value}»"
+            print(json.dumps(payload, ensure_ascii=False))
+            return 1
+
+    print(json.dumps(payload, ensure_ascii=False))
     return 0
 
 
@@ -181,7 +212,7 @@ def cmd_preview(args: argparse.Namespace, config: Config) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     store = SessionStore()
-    session = store.create(pdf_path, job)
+    session = store.create(pdf_path, job, password=args.password)
     try:
         description = session.describe()
         for sheet in description["sheets"]:
@@ -242,6 +273,15 @@ def build_parser() -> argparse.ArgumentParser:
     printer.add_argument("file", nargs="?", help="путь или URL; можно передать в JSON на stdin")
     printer.add_argument("--stdin", action="store_true", help="взять параметры из JSON на stdin")
     printer.add_argument("--insecure", action="store_true", help="не проверять TLS при скачивании")
+    printer.add_argument("--password", help="пароль защищённого PDF")
+    printer.add_argument(
+        "--no-wait", action="store_true",
+        help="не ждать конца печати (вернуться сразу после постановки в очередь)",
+    )
+    printer.add_argument(
+        "--wait-timeout", type=float, default=300.0, dest="wait_timeout",
+        help="сколько ждать конца печати, секунд (по умолчанию 300)",
+    )
     _add_job_arguments(printer)
     printer.set_defaults(handler=cmd_print)
 
@@ -272,6 +312,7 @@ def build_parser() -> argparse.ArgumentParser:
     preview.add_argument("--out", default="preview", help="каталог для картинок")
     preview.add_argument("--width", type=int, default=900)
     preview.add_argument("--insecure", action="store_true")
+    preview.add_argument("--password", help="пароль защищённого PDF")
     _add_job_arguments(preview)
     preview.set_defaults(handler=cmd_preview)
 

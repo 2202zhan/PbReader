@@ -39,6 +39,11 @@ class Config:
     log_file: Path | None = None
     #: Сколько держать открытые задания предпросмотра, секунды.
     job_ttl_seconds: int = 1800
+    #: Сколько хранить файлы в рабочем каталоге, часы. Аппарат работает
+    #: месяцами: без уборки диск заканчивается.
+    work_file_ttl_hours: int = 24
+    #: Как часто убирать рабочий каталог, минуты.
+    sweep_interval_minutes: int = 60
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> "Config":

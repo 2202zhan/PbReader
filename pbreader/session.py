@@ -132,6 +132,11 @@ class SessionStore:
             for session_id in list(self._sessions):
                 self._drop_locked(session_id)
 
+    def open_paths(self) -> list[Path]:
+        """Файлы, открытые прямо сейчас, — их уборка трогать не должна."""
+        with self._lock:
+            return [session.document.path for session in self._sessions.values()]
+
     def _drop_locked(self, session_id: str) -> None:
         session = self._sessions.pop(session_id, None)
         if session is not None:

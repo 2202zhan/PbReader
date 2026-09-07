@@ -105,8 +105,12 @@ class PrintFailed(RuntimeError):
 class PrintResult:
     printer: str
     sheets: int
+    #: Страниц с содержимым (пустые обороты дуплекса сюда не входят).
     pages_printed: int
     dpi: int
+    #: Всего страниц отдано спулеру, включая пустые обороты. Именно это число
+    #: спулер считает «TotalPages», по нему сверяется ход печати.
+    pages_sent: int = 0
     job_id: int | None = None
     warnings: list[str] = field(default_factory=list)
 
@@ -273,6 +277,7 @@ def print_document(
             sheets=len(sheets) * driver_copies,
             pages_printed=printed,
             dpi=dpi,
+            pages_sent=len(order),
             job_id=job_id,
             warnings=warnings,
         )

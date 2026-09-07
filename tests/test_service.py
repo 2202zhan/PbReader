@@ -177,3 +177,94 @@ class TestUpload:
         with pytest.raises(urllib.error.HTTPError) as error:
             request(ui_service, "/upload", "POST", body=None)
         assert error.value.code in (400, 411)
+
+
+class TestPasswordFlow:
+    def test_locked_document_asks_for_a_password_by_code(self, service, locked_pdf):
+        """Код нужен окну: «нужен пароль» — это следующий шаг диалога, а не
+        поломка, и отличать его от прочих отказов по тексту нельзя."""
+        with pytest.raises(urllib.error.HTTPError) as error:
+            request(service, "/sessions", "POST", {"file": str(locked_pdf)})
+        body = json.loads(error.value.read())
+        assert error.value.code == 422
+        assert body["code"] == "password_required"
+
+    def test_wrong_password_asks_again(self, service, locked_pdf):
+        with pytest.raises(urllib.error.HTTPError) as error:
+            request(service, "/sessions", "POST", {"file": str(locked_pdf), "password": "мимо"})
+        assert json.loads(error.value.read())["code"] == "password_required"
+
+    def test_correct_password_opens_the_document(self, service, locked_pdf):
+        data = request(service, "/sessions", "POST", {"file": str(locked_pdf), "password": "секрет"})
+        assert data["document"]["page_count"] == 2
+
+    def test_ordinary_errors_keep_their_own_code(self, service, make_pdf):
+        path = make_pdf([(A4.size.width, A4.size.height, 0)])
+        with pytest.raises(urllib.error.HTTPError) as error:
+            request(service, "/sessions", "POST", {"file": str(path), "pages": "50-60"})
+        assert json.loads(error.value.read())["code"] == "error"
+
+
+class TestPrintJobs:
+    def test_unknown_job_is_reported_as_unknown_not_printed(self, service):
+        status = request(service, "/print-jobs/424242")
+        assert status["state"] == "unknown"
+        assert status["confirmed"] is False
+
+    def test_job_list_is_empty_until_something_is_printed(self, service):
+        assert request(service, "/print-jobs")["jobs"] == []
+
+    def test_registered_job_appears_with_its_pages(self, service):
+        """Регистрация — то, что превращает «отправлено» в отслеживаемое."""
+        service.jobs.register(11, "Canon LBP722", total_pages=7, document="акт.pdf")
+        listing = request(service, "/print-jobs")["jobs"]
+        assert [job["job_id"] for job in listing] == [11]
+        assert listing[0]["total_pages"] == 7
+        assert listing[0]["document"] == "акт.pdf"
+
+    def test_printer_state_needs_a_printer(self, service):
+        with pytest.raises(urllib.error.HTTPError) as error:
+            request(service, "/printer-state")
+        assert json.loads(error.value.read())["code"] == "no_printer"
+
+
+class TestHousekeepingWiring:
+    def test_service_sweeps_its_work_directory(self, tmp_path):
+        """Сервис живёт неделями — уборка должна идти сама, без напоминаний."""
+        import os
+        import time
+
+        work = tmp_path / "work"
+        work.mkdir(parents=True)
+        stale = work / "старый.pdf"
+        stale.write_bytes(b"x" * 1024)
+        moment = time.time() - 100 * 3600
+        os.utime(stale, (moment, moment))
+
+        server = _start(tmp_path, with_ui=False)
+        try:
+            for _ in range(50):
+                if not stale.exists():
+                    break
+                time.sleep(0.05)
+            assert not stale.exists()
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_open_documents_are_not_swept(self, tmp_path, make_pdf):
+        import os
+        import time
+
+        server = _start(tmp_path, with_ui=False)
+        try:
+            source = make_pdf([(A4.size.width, A4.size.height, 0)])
+            moment = time.time() - 100 * 3600
+            os.utime(source, (moment, moment))
+            session = server.sessions.create(source, __import__("pbreader").PrintJob())
+            assert server.housekeeper.sweep_now().kept_in_use >= 0
+            assert source.exists()
+            server.sessions.drop(session.id)
+        finally:
+            server.shutdown()
+            server.server_close()

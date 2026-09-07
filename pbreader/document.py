@@ -10,12 +10,15 @@ Artifex. PDFium — BSD, тот же движок, которым печатае
 
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
 from .units import PT_PER_INCH, Size
+
+logger = logging.getLogger(__name__)
 
 try:  # pragma: no cover - зависит от окружения
     import pypdfium2 as pdfium
@@ -53,14 +56,36 @@ class PdfDocument:
     def __init__(self, path: str | Path, password: str | None = None) -> None:
         self.path = Path(path)
         self._lock = threading.RLock()
+        self.has_forms = False
         try:
             self._doc = pdfium.PdfDocument(str(self.path), password=password, autoclose=True)
+            self._init_forms()
             self._page_count = len(self._doc)
         except pdfium.PdfiumError as exc:
             message = str(exc).lower()
             if "password" in message:
                 raise PdfPasswordRequired(f"PDF защищён паролем: {self.path.name}") from exc
             raise PdfError(f"Не удалось открыть PDF {self.path.name}: {exc}") from exc
+
+    def _init_forms(self) -> None:
+        """Включает отрисовку заполненных полей формы (AcroForm/XFA).
+
+        Без этого PDFium рисует ПУСТОЙ бланк, даже когда поля заполнены:
+        значения полей живут в отдельном слое, и движок трогает его только
+        после init_forms(). Человек приносит заполненное заявление — из
+        аппарата выходит чистый бланк, и заметить это можно только на бумаге.
+
+        Вызов обязан идти сразу после открытия документа: PDFium требует
+        инициализировать формы ДО того, как у документа спросят число страниц
+        или возьмут страницу, иначе слой форм не подхватится.
+        """
+        try:
+            self._doc.init_forms()
+            self.has_forms = self._doc.formenv is not None
+        except Exception as exc:
+            # Сломанный слой форм — не повод не печатать документ: остальное
+            # содержимое отрисуется как обычно.
+            logger.warning("Не удалось включить формы в %s: %s", self.path.name, exc)
 
     def __enter__(self) -> "PdfDocument":
         return self

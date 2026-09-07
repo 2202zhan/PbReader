@@ -1,6 +1,8 @@
-"""Вывод задания на устройство."""
+"""Вывод задания на устройство и слежение за ним в очереди печати."""
 
 from __future__ import annotations
+
+from .jobs import JobState, JobStatus, JobTracker
 
 
 def print_document(*args, **kwargs):
@@ -10,4 +12,11 @@ def print_document(*args, **kwargs):
     return _print_document(*args, **kwargs)
 
 
-__all__ = ["print_document"]
+def printer_state(printer: str):
+    """Состояние принтера до отправки задания (только Windows)."""
+    from .jobs import printer_state as _printer_state
+
+    return _printer_state(printer)
+
+
+__all__ = ["JobState", "JobStatus", "JobTracker", "print_document", "printer_state"]

@@ -22,7 +22,7 @@ windows = [
     "pywin32>=306",   # принтеры, DEVMODE, DC
     "comtypes>=1.2",  # конвертация офисных форматов через COM
 ]
-dev = ["pytest>=7.4"]
+dev = ["pytest>=7.4", "pypdf>=4.0"]  # pypdf — только чтобы зашифровать тестовый PDF
 
 [project.scripts]
 pbreader = "pbreader.cli:main"

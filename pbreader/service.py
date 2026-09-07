@@ -37,6 +37,8 @@ from typing import Any
 
 from .config import Config
 from .document import PdfError, PdfPasswordRequired
+from .housekeeping import Housekeeper
+from .output import JobTracker
 from .ui import render_ui_page
 from .job import PrintJob
 from .preview import DEFAULT_PREVIEW_WIDTH
@@ -48,16 +50,25 @@ logger = logging.getLogger(__name__)
 _PREVIEW_PATH = re.compile(r"^/sessions/([0-9a-f]{32})/preview/(\d+)$")
 _SESSION_PATH = re.compile(r"^/sessions/([0-9a-f]{32})$")
 _PRINT_PATH = re.compile(r"^/sessions/([0-9a-f]{32})/print$")
+_JOB_PATH = re.compile(r"^/print-jobs/(\d+)$")
+_JOB_CANCEL_PATH = re.compile(r"^/print-jobs/(\d+)/cancel$")
 MAX_BODY_BYTES = 1 * 1024 * 1024
 MAX_UPLOAD_BYTES = 512 * 1024 * 1024
 UPLOAD_CHUNK = 256 * 1024
 
 
 class ServiceError(Exception):
-    def __init__(self, status: HTTPStatus, message: str) -> None:
+    """Ошибка с машиночитаемым кодом.
+
+    Код нужен интерфейсу: «нужен пароль» — это не поломка, а следующий шаг
+    диалога, и отличать его от прочих отказов по тексту сообщения нельзя.
+    """
+
+    def __init__(self, status: HTTPStatus, message: str, code: str = "error") -> None:
         super().__init__(message)
         self.status = status
         self.message = message
+        self.code = code
 
 
 class PrintBoxService(ThreadingHTTPServer):
@@ -69,9 +80,20 @@ class PrintBoxService(ThreadingHTTPServer):
         self.token = config.token or secrets.token_urlsafe(24)
         self.with_ui = with_ui
         self.sessions = SessionStore(ttl_seconds=config.job_ttl_seconds)
+        self.jobs = JobTracker()
+        self.housekeeper = Housekeeper(
+            config.work_dir,
+            max_age_hours=config.work_file_ttl_hours,
+            interval_minutes=config.sweep_interval_minutes,
+            # Файлы открытых сессий уборка не трогает: по ним прямо сейчас
+            # показывают предпросмотр.
+            keep_provider=self.sessions.open_paths,
+        )
         super().__init__((config.host, config.port), _Handler)
+        self.housekeeper.start()
 
     def server_close(self) -> None:
+        self.housekeeper.stop()
         self.sessions.close_all()
         super().server_close()
 
@@ -108,9 +130,9 @@ class _Handler(BaseHTTPRequestHandler):
     def _json(self, data: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
         self._send(status, json.dumps(data, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
 
-    def _fail(self, status: HTTPStatus, message: str) -> None:
+    def _fail(self, status: HTTPStatus, message: str, code: str = "error") -> None:
         logger.warning("%s %s → %d: %s", self.command, self.path, status, message)
-        self._json({"error": message}, status)
+        self._json({"error": message, "code": code}, status)
 
     def _authorize(self, query: dict[str, list[str]]) -> None:
         expected = self.server.token
@@ -184,13 +206,30 @@ class _Handler(BaseHTTPRequestHandler):
             if match and method == "POST":
                 return self._print(match.group(1))
 
+            if path == "/print-jobs" and method == "GET":
+                return self._json({"jobs": [j.to_dict() for j in self.server.jobs.all()]})
+
+            match = _JOB_PATH.match(path)
+            if match and method == "GET":
+                return self._json(self.server.jobs.status(int(match.group(1))).to_dict())
+
+            match = _JOB_CANCEL_PATH.match(path)
+            if match and method == "POST":
+                job_id = int(match.group(1))
+                cancelled = self.server.jobs.cancel(job_id)
+                return self._json({"cancelled": cancelled, **self.server.jobs.status(job_id).to_dict()})
+
+            if path == "/printer-state" and method == "GET":
+                return self._printer_state(query)
+
             self._fail(HTTPStatus.NOT_FOUND, f"Нет такого метода: {method} {path}")
         except ServiceError as exc:
-            self._fail(exc.status, exc.message)
+            self._fail(exc.status, exc.message, exc.code)
         except SessionExpired as exc:
-            self._fail(HTTPStatus.NOT_FOUND, str(exc))
+            self._fail(HTTPStatus.NOT_FOUND, str(exc), "session_expired")
         except PdfPasswordRequired as exc:
-            self._fail(HTTPStatus.UNPROCESSABLE_ENTITY, str(exc))
+            # Не поломка, а следующий шаг: окно спросит пароль и повторит.
+            self._fail(HTTPStatus.UNPROCESSABLE_ENTITY, str(exc), "password_required")
         except (PdfError, PrinterUnavailable, ValueError, IndexError, FileNotFoundError) as exc:
             self._fail(HTTPStatus.BAD_REQUEST, str(exc))
         except Exception as exc:  # pragma: no cover
@@ -276,7 +315,7 @@ class _Handler(BaseHTTPRequestHandler):
         if not job.printer:
             job = job.with_(printer=config.printer or (default_printer() if IS_WINDOWS else "") or "")
 
-        session = self.server.sessions.create(pdf_path, job, password=body.get("password"))
+        session = self.server.sessions.create(pdf_path, job, password=body.get("password") or None)
         data = session.describe()
         data["preview_url_template"] = (
             f"/sessions/{session.id}/preview/{{sheet}}?side=front&width={DEFAULT_PREVIEW_WIDTH}"
@@ -315,8 +354,30 @@ class _Handler(BaseHTTPRequestHandler):
         body = self._body()
         if body:
             session.update_job(PrintJob.from_dict({**session.job.to_dict(), **body}))
+
         result = session.print()
-        return self._json({"printed": True, **asdict(result)})
+
+        # «Отправлено» — это ещё не «напечатано»: задание только встало в
+        # очередь. Регистрируем его, чтобы интерфейс мог довести до конца и
+        # показать замятие или конец бумаги, а не отчитаться об успехе.
+        status = None
+        if result.job_id:
+            status = self.server.jobs.register(
+                result.job_id, result.printer, result.pages_sent, session.document.path.name
+            ).to_dict()
+
+        return self._json({"submitted": True, "status": status, **asdict(result)})
+
+    def _printer_state(self, query: dict[str, list[str]]) -> None:
+        """Готов ли принтер. Спросить это ДО оплаты дешевле, чем объясняться после."""
+        printer = (query.get("printer") or [""])[0]
+        if not printer:
+            raise ServiceError(HTTPStatus.BAD_REQUEST, "Не указан принтер", "no_printer")
+        if not IS_WINDOWS:
+            return self._json({"printer": printer, "ready": False, "status": "только в Windows", "queued": 0})
+        from .output import printer_state
+
+        return self._json(printer_state(printer))
 
 
 def serve(config: Config | None = None, with_ui: bool = False) -> PrintBoxService:
