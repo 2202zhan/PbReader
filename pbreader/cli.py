@@ -77,6 +77,17 @@ def cmd_print(args: argparse.Namespace, config: Config) -> int:
     from .document import PdfDocument
     from .output import JobTracker, print_document
 
+    # Запись о том, с чем ушло задание. В прежнем print.py такая строка была, и
+    # она не украшение: когда с аппарата приходит «напечаталось не то», это
+    # единственный след того, что человек на самом деле выбрал.
+    logger.info(
+        "Задание: файл=%s принтер=%s копий=%d стороны=%s ориентация=%s цвет=%s "
+        "лоток=%s страницы=%s масштаб=%s каталог=%s",
+        pdf_path.name, job.printer or "по умолчанию", job.copies, job.duplex.value,
+        job.orientation.value, job.color.value, job.tray if job.tray is not None else "по умолчанию",
+        job.pages or "все", job.scale.value, config.work_dir,
+    )
+
     password = args.password or params.get("password") or None
     with PdfDocument(pdf_path, password=password) as document:
         result = print_document(document, job, document_name=params.get("document_name"))

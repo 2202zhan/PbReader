@@ -4,6 +4,7 @@
 точки входа.
 """
 
+import importlib
 import sys
 from pathlib import Path
 
@@ -86,7 +87,8 @@ class TestEntryPoints:
         """Двойной щелчок по значку — это «открой окно», а не «покажи справку»."""
         from pbreader import app
 
-        import pbreader.cli  # noqa: F401  — модуль должен быть загружен до подмены
+        # Модуль должен быть загружен до подмены его функции.
+        importlib.import_module("pbreader.cli")
 
         seen = {}
         monkeypatch.setattr(app, "_log_path", lambda: Path("/tmp/pbreader-test.log"))

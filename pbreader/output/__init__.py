@@ -7,7 +7,12 @@ from .jobs import JobState, JobStatus, JobTracker
 
 def print_document(*args, **kwargs):
     """Печатает документ (только Windows). Импорт ленивый: модуль тянет Win32."""
-    from .gdi import print_document as _print_document
+    try:
+        from .gdi import print_document as _print_document
+    except ImportError as exc:
+        from ..printers import PrinterUnavailable
+
+        raise PrinterUnavailable(str(exc)) from exc
 
     return _print_document(*args, **kwargs)
 

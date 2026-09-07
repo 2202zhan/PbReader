@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import sys
 from ctypes import wintypes
 from dataclasses import dataclass, field
 from typing import Callable
@@ -28,6 +29,16 @@ from ..sheets import emission_order, plan_sheets
 from ..units import PT_PER_INCH, Rect, Size
 
 logger = logging.getLogger(__name__)
+
+if sys.platform != "win32":
+    # Понятная ошибка вместо «module 'ctypes' has no attribute 'WinDLL'»:
+    # модуль импортируют лениво, и такое сообщение всплывало бы посреди
+    # печати, ничего не объясняя тому, кто просто запустил не на том
+    # компьютере.
+    raise ImportError(
+        f"Вывод на принтер доступен только в Windows (система: {sys.platform}). "
+        f"Раскладку и предпросмотр можно считать где угодно."
+    )
 
 _gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
 
