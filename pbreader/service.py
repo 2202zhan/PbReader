@@ -37,6 +37,7 @@ from typing import Any
 
 from .config import Config
 from .document import PdfError, PdfPasswordRequired
+from .coverage import CoverageLimits, check_limits
 from .housekeeping import Housekeeper
 from .output import JobTracker
 from .ui import render_ui_page
@@ -50,6 +51,7 @@ logger = logging.getLogger(__name__)
 _PREVIEW_PATH = re.compile(r"^/sessions/([0-9a-f]{32})/preview/(\d+)$")
 _SESSION_PATH = re.compile(r"^/sessions/([0-9a-f]{32})$")
 _PRINT_PATH = re.compile(r"^/sessions/([0-9a-f]{32})/print$")
+_COVERAGE_PATH = re.compile(r"^/sessions/([0-9a-f]{32})/coverage$")
 _JOB_PATH = re.compile(r"^/print-jobs/(\d+)$")
 _JOB_CANCEL_PATH = re.compile(r"^/print-jobs/(\d+)/cancel$")
 MAX_BODY_BYTES = 1 * 1024 * 1024
@@ -201,6 +203,10 @@ class _Handler(BaseHTTPRequestHandler):
             match = _PREVIEW_PATH.match(path)
             if match and method == "GET":
                 return self._preview(match.group(1), int(match.group(2)), query)
+
+            match = _COVERAGE_PATH.match(path)
+            if match and method == "GET":
+                return self._coverage(match.group(1))
 
             match = _PRINT_PATH.match(path)
             if match and method == "POST":
@@ -355,6 +361,18 @@ class _Handler(BaseHTTPRequestHandler):
         if body:
             session.update_job(PrintJob.from_dict({**session.job.to_dict(), **body}))
 
+        # Порог заполнения проверяем до отправки: после того как задание ушло в
+        # аппарат, тонер уже потрачен.
+        limits = CoverageLimits.from_config(self.server.config)
+        if limits.active:
+            verdict = check_limits(session.coverage(), limits)
+            if not verdict.allowed:
+                raise ServiceError(
+                    HTTPStatus.FORBIDDEN,
+                    "; ".join(verdict.violations) or "Задание превышает порог заполнения",
+                    "coverage_limit",
+                )
+
         result = session.print()
 
         # «Отправлено» — это ещё не «напечатано»: задание только встало в
@@ -367,6 +385,21 @@ class _Handler(BaseHTTPRequestHandler):
             ).to_dict()
 
         return self._json({"submitted": True, "status": status, **asdict(result)})
+
+    def _coverage(self, session_id: str) -> None:
+        """Сколько тонера уйдёт на задание — и не выходит ли это за порог."""
+        session = self.server.sessions.get(session_id)
+        limits = CoverageLimits.from_config(self.server.config)
+        coverage = session.coverage()
+        return self._json({
+            **coverage.to_dict(),
+            "verdict": check_limits(coverage, limits).to_dict(),
+            "limits": {
+                "max_page_coverage": limits.max_page_coverage,
+                "max_ink_units": limits.max_ink_units,
+                "enforce": limits.enforce,
+            },
+        })
 
     def _printer_state(self, query: dict[str, list[str]]) -> None:
         """Готов ли принтер. Спросить это ДО оплаты дешевле, чем объясняться после."""

@@ -14,10 +14,12 @@ from pbreader.paper import A4
 from pbreader.service import PrintBoxService
 
 
-def _start(tmp_path, with_ui):
+def _start(tmp_path, with_ui, **config_extra):
     import threading
 
-    config = Config(work_dir=tmp_path / "work", host="127.0.0.1", port=0, token="test-token")
+    config = Config(
+        work_dir=tmp_path / "work", host="127.0.0.1", port=0, token="test-token", **config_extra
+    )
     server = PrintBoxService(config, with_ui=with_ui)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
@@ -268,3 +270,90 @@ class TestHousekeepingWiring:
         finally:
             server.shutdown()
             server.server_close()
+
+
+@pytest.fixture
+def strict_service(tmp_path):
+    """Сервис с включённым порогом заполнения — как настроил бы оператор."""
+    server = _start(
+        tmp_path, with_ui=False,
+        max_page_coverage=0.6, max_ink_units=40, enforce_coverage_limit=True,
+    )
+    yield server
+    server.shutdown()
+    server.server_close()
+
+
+class TestCoverageEndpoint:
+    def test_ordinary_document_passes(self, service, make_filled_pdf):
+        from conftest import FILL_BLANK
+
+        path = make_filled_pdf([FILL_BLANK] * 3)
+        session = request(service, "/sessions", "POST", {"file": str(path)})
+        data = request(service, f"/sessions/{session['session_id']}/coverage")
+        assert data["average_percent"] == 0.0
+        assert data["verdict"]["allowed"] is True
+
+    def test_black_pages_are_reported_with_their_cost(self, service, make_filled_pdf):
+        from conftest import FILL_BLACK
+
+        path = make_filled_pdf([FILL_BLACK] * 4)
+        session = request(service, "/sessions", "POST", {"file": str(path)})
+        data = request(service, f"/sessions/{session['session_id']}/coverage")
+        assert data["maximum_percent"] > 99
+        assert data["total_ink_units"] == pytest.approx(80, rel=0.05)
+
+    def test_coverage_follows_the_parameters(self, service, make_filled_pdf):
+        """Уменьшили масштаб — упал и расход: считается лист, а не файл."""
+        from conftest import FILL_BLACK
+
+        path = make_filled_pdf([FILL_BLACK])
+        session = request(service, "/sessions", "POST", {"file": str(path)})
+        full = request(service, f"/sessions/{session['session_id']}/coverage")["total_ink_units"]
+
+        request(service, f"/sessions/{session['session_id']}", "PATCH",
+                {"scale": "custom", "scale_percent": 50})
+        half = request(service, f"/sessions/{session['session_id']}/coverage")["total_ink_units"]
+        assert half == pytest.approx(full / 4, rel=0.1)
+
+
+class TestCoverageEnforcement:
+    def test_printing_a_black_document_is_refused_before_it_starts(self, strict_service, make_filled_pdf):
+        """Отказ обязан случиться ДО отправки: после того как задание ушло в
+        аппарат, тонер уже потрачен."""
+        from conftest import FILL_BLACK
+
+        path = make_filled_pdf([FILL_BLACK] * 4)
+        session = request(strict_service, "/sessions", "POST", {"file": str(path)})
+        with pytest.raises(urllib.error.HTTPError) as error:
+            request(strict_service, f"/sessions/{session['session_id']}/print", "POST", {})
+        body = json.loads(error.value.read())
+        assert error.value.code == 403
+        assert body["code"] == "coverage_limit"
+        assert "Заполнение выше" in body["error"]
+
+    def test_the_verdict_says_why(self, strict_service, make_filled_pdf):
+        from conftest import FILL_BLACK
+
+        path = make_filled_pdf([FILL_BLACK] * 4)
+        session = request(strict_service, "/sessions", "POST", {"file": str(path)})
+        verdict = request(strict_service, f"/sessions/{session['session_id']}/coverage")["verdict"]
+        assert verdict["allowed"] is False
+        assert verdict["enforced"] is True
+        assert len(verdict["violations"]) == 2  # и порог страницы, и потолок задания
+
+    def test_an_ordinary_document_is_not_stopped(self, strict_service, make_filled_pdf):
+        """Порог не должен мешать обычной печати — иначе его выключат."""
+        light = "0 0 0 rg 60 60 200 12 re f"
+        path = make_filled_pdf([light] * 4)
+        session = request(strict_service, "/sessions", "POST", {"file": str(path)})
+        verdict = request(strict_service, f"/sessions/{session['session_id']}/coverage")["verdict"]
+        assert verdict["allowed"] is True
+
+    def test_limits_are_reported_so_the_interface_can_explain_them(self, strict_service, make_filled_pdf):
+        from conftest import FILL_BLANK
+
+        path = make_filled_pdf([FILL_BLANK])
+        session = request(strict_service, "/sessions", "POST", {"file": str(path)})
+        limits = request(strict_service, f"/sessions/{session['session_id']}/coverage")["limits"]
+        assert limits == {"max_page_coverage": 0.6, "max_ink_units": 40.0, "enforce": True}

@@ -18,9 +18,10 @@ from typing import Any
 
 from PIL import Image, ImageDraw
 
+from .coverage import REFERENCE_COVERAGE, ink_from_image
 from .document import PdfDocument
 from .geometry import DeviceGeometry, build_sheet
-from .job import PrintJob, ScaleMode
+from .job import ColorMode, PrintJob, ScaleMode
 from .layout import Placement, compute_placement, resolve_orientation
 from .raster import render_for_preview
 from .sheets import Sheet, plan_sheets
@@ -54,6 +55,10 @@ class SheetPreview:
     scale_mode: str
     is_clipped: bool  # геометрически вылезает за область печати
     ink_clipped: bool  # и в обрезаемой части действительно есть изображение
+    #: Доля закрашенного на этой стороне, 0..1 — сколько тонера она стоит.
+    coverage: float = 0.0
+    #: То же в «обычных страницах»: 1.0 — как страница текста.
+    ink_units: float = 0.0
     warnings: list[str] = field(default_factory=list)
 
     def meta(self) -> dict[str, Any]:
@@ -130,6 +135,8 @@ def render_sheet_side(
 
     placement: Placement | None = None
     ink_clipped = False
+    coverage = 0.0
+    ink = 0.0
 
     if page_number is not None:
         placement = compute_placement(document.page_size(page_number), sheet_geometry, job)
@@ -137,6 +144,15 @@ def render_sheet_side(
         canvas.paste(raster.image, (raster.dest_px[0], raster.dest_px[1]))
 
         printable_px = _px_rect(sheet_geometry.printable, dpi)
+        # Заполнение считаем по уже нарисованному листу и ДО осветления
+        # обрезаемых полей: растр всё равно построен, отдельный проход не нужен.
+        left, top, right, bottom = printable_px
+        coverage, ink, _ = ink_from_image(
+            canvas.crop((max(0, left), max(0, top), min(canvas.width, right), min(canvas.height, bottom))),
+            job.color is ColorMode.COLOR,
+            1.0,
+        )
+
         if placement.is_clipped:
             ink_clipped = _ink_lost(raster.image, raster.dest_px, printable_px)
             _fade(canvas, printable_px)
@@ -173,6 +189,8 @@ def render_sheet_side(
         scale_mode=(placement.resolved_scale_mode if placement else ScaleMode.ACTUAL).value,
         is_clipped=bool(placement and placement.is_clipped),
         ink_clipped=ink_clipped,
+        coverage=round(coverage, 4),
+        ink_units=round(ink / REFERENCE_COVERAGE, 2),
         warnings=warnings,
     )
 

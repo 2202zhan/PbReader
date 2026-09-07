@@ -165,6 +165,21 @@
   .lock-row input { flex: 1; }
   .lock-error { margin-top: 7px; font-size: 12px; color: var(--danger); }
 
+  .toner {
+    margin-top: 16px; padding: 11px 12px; border-radius: var(--radius);
+    background: var(--panel-2); border: 1px solid var(--line);
+  }
+  .toner-head { display: flex; align-items: baseline; gap: 10px; font-size: 13px; color: var(--ink-soft); }
+  .toner-head b { margin-left: auto; color: var(--ink); font-size: 14px; }
+  .toner-sub { margin-top: 3px; font-size: 12px; color: var(--ink-faint); }
+  .toner.heavy { background: var(--warn-bg); border-color: var(--warn-line); }
+  .toner.heavy .toner-head, .toner.heavy .toner-sub { color: var(--warn-ink); }
+  .toner.heavy .toner-head b { color: var(--warn-ink); }
+  .toner-alert { margin-top: 8px; font-size: 12px; line-height: 1.45; color: var(--warn-ink); }
+  .toner.blocked { background: var(--danger-bg); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+  .toner.blocked .toner-head, .toner.blocked .toner-head b,
+  .toner.blocked .toner-sub, .toner.blocked .toner-alert { color: var(--danger); }
+
   .job {
     margin-top: 12px; padding: 11px 12px; border-radius: var(--radius);
     background: var(--panel-2); border: 1px solid var(--line);
@@ -277,6 +292,15 @@
     <div class="row"><label for="pages">Страницы</label><input type="text" id="pages" placeholder="все"></div>
     <div class="hint">Например: 1,3,5-8,12-</div>
     <label class="check"><input type="checkbox" id="autoRotate"> Доворачивать страницу, если так крупнее</label>
+
+    <div id="tonerPanel" class="toner" hidden>
+      <div class="toner-head">
+        <span>Расход тонера</span>
+        <b id="tonerUnits">—</b>
+      </div>
+      <div class="toner-sub" id="tonerSub"></div>
+      <div class="toner-alert" id="tonerAlert" hidden></div>
+    </div>
 
     <div style="margin-top:18px">
       <button class="act primary block" id="printBtn" disabled>Печать</button>
@@ -414,6 +438,7 @@ async function openPath(path, name) {
     hidePasswordPrompt();
     applyDescribe(data);
     await refreshPreview();
+    guard(refreshToner());
   } catch (error) {
     if (error.code === "password_required") {
       showPasswordPrompt(Boolean(state.password));
@@ -448,6 +473,7 @@ async function uploadFile(file) {
   state.jobId = null;
   clearTimeout(state.jobTimer);
   document.getElementById("jobPanel").hidden = true;
+  document.getElementById("tonerPanel").hidden = true;
   const response = await api("/upload", {
     method: "POST",
     body: file,
@@ -472,6 +498,7 @@ async function pushJob() {
     const data = await send(`/sessions/${state.sessionId}`, "PATCH", collectJob());
     applyDescribe(data);
     await refreshPreview();
+    guard(refreshToner());
   } catch (error) {
     banner(error.message);
   }
@@ -509,6 +536,44 @@ function plural(n, one, few, many) {
   return many;
 }
 
+async function refreshToner() {
+  if (!state.sessionId) return;
+  const panel = document.getElementById("tonerPanel");
+  try {
+    const data = await json(`/sessions/${state.sessionId}/coverage`);
+    const blocked = data.verdict.enforced && !data.verdict.allowed;
+    const heavy = data.verdict.violations.length > 0;
+
+    panel.hidden = false;
+    panel.className = "toner" + (blocked ? " blocked" : heavy ? " heavy" : "");
+    document.getElementById("tonerUnits").textContent = `как ${formatUnits(data.total_ink_units)}`;
+
+    const parts = [`в среднем ${data.average_percent} %`];
+    if (data.heaviest_page) parts.push(`самая тёмная — стр. ${data.heaviest_page}, ${data.maximum_percent} %`);
+    // Выборка: у длинного документа считается не каждая страница.
+    if (!data.complete) parts.push(`оценка по ${data.measured_pages} страницам`);
+    document.getElementById("tonerSub").textContent = parts.join(" · ");
+
+    const alert = document.getElementById("tonerAlert");
+    alert.hidden = !heavy;
+    alert.textContent = data.verdict.violations.join(". ") +
+      (blocked ? ". Печать не будет выполнена." : "");
+    document.getElementById("printBtn").disabled = !state.windows || blocked;
+  } catch (error) {
+    panel.hidden = true;
+  }
+}
+
+function formatUnits(units) {
+  // При дробном количестве существительное идёт в родительном падеже
+  // единственного числа: «0,5 страницы», а не «0,5 страниц».
+  if (units < 10 && Math.round(units) !== units) {
+    return `${units.toFixed(1).replace(".", ",")} страницы`;
+  }
+  const whole = Math.round(units);
+  return `${whole} ${plural(whole, "страница", "страницы", "страниц")}`;
+}
+
 async function refreshPreview() {
   if (!state.sessionId) return;
   const stage = document.getElementById("stage");
@@ -542,8 +607,9 @@ function renderSheetInfo(meta) {
   const sheet = state.describe ? state.describe.sheets[state.sheet - 1] : null;
   const copyNote = sheet && state.describe.job.copies > 1 ? `, копия ${sheet.copy}` : "";
   const pageNote = meta.page ? `стр. ${meta.page}` : "чистая сторона";
+  const inkNote = meta.coverage === undefined ? "" : ` · заполнение ${Math.round(meta.coverage * 100)} %`;
   document.getElementById("sheetCounter").textContent =
-    `лист ${state.sheet} из ${total} · ${pageNote}${copyNote}`;
+    `лист ${state.sheet} из ${total} · ${pageNote}${copyNote}${inkNote}`;
   document.getElementById("prevSheet").disabled = state.sheet <= 1;
   document.getElementById("nextSheet").disabled = state.sheet >= total;
 

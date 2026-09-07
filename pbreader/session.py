@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .coverage import DocumentCoverage, measure_job
 from .devices import resolve_device
 from .document import PdfDocument
 from .geometry import DeviceGeometry
@@ -39,6 +40,8 @@ class PreviewSession:
     device: DeviceGeometry
     created_at: float
     touched_at: float
+    _coverage: DocumentCoverage | None = None
+    _coverage_key: tuple | None = None
 
     def touch(self) -> None:
         self.touched_at = time.time()
@@ -48,6 +51,10 @@ class PreviewSession:
         от принтера, формата и лотка, а их пользователь как раз и переключает."""
         self.job = job
         self.device = resolve_device(job)
+        # Заполнение зависит от масштаба, ориентации и режима цвета — при смене
+        # параметров прежний замер уже не про этот лист.
+        self._coverage = None
+        self._coverage_key = None
         self.touch()
 
     @property
@@ -59,6 +66,20 @@ class PreviewSession:
         data = describe_job(self.document, self.job, self.device)
         data["session_id"] = self.id
         return data
+
+    def coverage(self) -> DocumentCoverage:
+        """Сколько тонера уйдёт на задание. Результат запоминается.
+
+        Замер стоит одного прохода растеризации по документу, а интерфейс
+        спрашивает его при каждом показе — считать заново на неизменившемся
+        задании незачем.
+        """
+        key = (tuple(sorted(self.job.to_dict().items(), key=lambda kv: kv[0])), self.document.path)
+        if self._coverage is None or self._coverage_key != key:
+            self._coverage = measure_job(self.document, self.job, self.device)
+            self._coverage_key = key
+            self.touch()
+        return self._coverage
 
     def preview(
         self, sheet_number: int, side: str = "front", width: int = DEFAULT_PREVIEW_WIDTH
