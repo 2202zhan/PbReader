@@ -17,6 +17,27 @@ def print_document(*args, **kwargs):
     return _print_document(*args, **kwargs)
 
 
+def _gdi():
+    """Ленивый импорт Win32-ветки с понятной ошибкой вне Windows."""
+    try:
+        from . import gdi
+    except ImportError as exc:
+        from ..printers import PrinterUnavailable
+
+        raise PrinterUnavailable(str(exc)) from exc
+    return gdi
+
+
+def diagnose(printer: str, job=None):
+    """Что принтер сообщает о себе и о выводе растра (только Windows)."""
+    return _gdi().diagnose(printer, job)
+
+
+def print_test_page(printer: str, job=None):
+    """Пробная страница мимо PDF — проверяет сам путь до бумаги (только Windows)."""
+    return _gdi().print_test_page(printer, job)
+
+
 def printer_state(printer: str):
     """Состояние принтера до отправки задания (только Windows)."""
     from .jobs import printer_state as _printer_state
@@ -24,4 +45,7 @@ def printer_state(printer: str):
     return _printer_state(printer)
 
 
-__all__ = ["JobState", "JobStatus", "JobTracker", "print_document", "printer_state"]
+__all__ = [
+    "JobState", "JobStatus", "JobTracker",
+    "diagnose", "print_document", "print_test_page", "printer_state",
+]

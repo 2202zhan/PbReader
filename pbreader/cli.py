@@ -13,6 +13,10 @@ tray_bin, так что main.js можно переключить, не трог
 программа, чтобы проверять параметры и предпросмотр без основного проекта.
 `pbreader printers` — список принтеров и их лотков (нужен при заведении аппарата:
 номера лотков теперь берутся отсюда, а не вбиваются руками).
+
+`pbreader diagnose --test-page` — когда задание уходит, а бумага чистая: что
+драйвер сообщает о выводе растра и доходит ли до листа простая картинка,
+нарисованная мимо PDF.
 `pbreader preview` — сохранить листы в PNG, чтобы посмотреть глазами без киоска.
 """
 
@@ -209,6 +213,44 @@ def cmd_printers(args: argparse.Namespace, config: Config) -> int:
     return 0
 
 
+def cmd_diagnose(args: argparse.Namespace, config: Config) -> int:
+    """Почему на бумаге пусто: что говорит драйвер и доходит ли до неё растр."""
+    from .output import diagnose, print_test_page
+    from .printers import default_printer
+
+    printer = args.printer or config.printer or default_printer()
+    if not printer:
+        print("Принтер не задан, и принтера по умолчанию в системе нет")
+        return 2
+
+    report = diagnose(printer)
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        raster = report["raster"]
+        print(f"\nПринтер: {report['printer']}")
+        print(f"  разрешение:      {report['dpi']['x']}x{report['dpi']['y']} dpi")
+        print(f"  бумага:          {report['paper_px']['width']}x{report['paper_px']['height']} px "
+              f"({report['paper_mm']['width']}x{report['paper_mm']['height']} мм)")
+        print(f"  область печати:  {report['printable_px']['width']}x{report['printable_px']['height']} px")
+        print(f"  смещение:        {report['offset_px']['x']}, {report['offset_px']['y']} px "
+              f"(поля {report['margins_mm']['left']} / {report['margins_mm']['top']} мм)")
+        print(f"  копий драйвером: {report['driver_copies']}")
+        print("  вывод растра:")
+        for name, available in raster.items():
+            print(f"    {name:20} {'да' if available else 'НЕТ'}")
+        if not (raster["StretchDIBits"] or raster["SetDIBitsToDevice"]):
+            print("\n  Драйвер не заявляет ни одного способа вывести растр — печать выйдет пустой.")
+
+    if args.test_page:
+        print("\nОтправляю пробную страницу (рамка, диагонали, серые полосы)…")
+        result = print_test_page(printer)
+        print(f"Отправлено, задание {result.job_id}.")
+        print("Вышел лист с рамкой — путь до бумаги рабочий, разбираться надо с документом.")
+        print("Вышел пустой лист — дело в выводе растра; смотрите предупреждения выше.")
+    return 0
+
+
 def cmd_preview(args: argparse.Namespace, config: Config) -> int:
     """Сохраняет листы задания в PNG — проверить раскладку без аппарата."""
     from .session import SessionStore
@@ -320,6 +362,15 @@ def build_parser() -> argparse.ArgumentParser:
     printers = subparsers.add_parser("printers", help="принтеры, лотки и возможности")
     printers.add_argument("--json", action="store_true")
     printers.set_defaults(handler=cmd_printers)
+
+    checkup = subparsers.add_parser(
+        "diagnose", help="почему на бумаге пусто: возможности драйвера и пробная страница"
+    )
+    checkup.add_argument("--printer", help="имя принтера (по умолчанию — системный)")
+    checkup.add_argument("--test-page", action="store_true", dest="test_page",
+                         help="напечатать пробную страницу мимо PDF")
+    checkup.add_argument("--json", action="store_true")
+    checkup.set_defaults(handler=cmd_diagnose)
 
     preview = subparsers.add_parser("preview", help="сохранить листы задания в PNG")
     preview.add_argument("file")
