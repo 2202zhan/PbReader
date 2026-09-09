@@ -42,11 +42,19 @@
   /* Классы вроде .row/.seg задают display и тем самым перебивают атрибут
      hidden из стилей браузера — без !important спрятанные блоки видны. */
   [hidden] { display: none !important; }
-  html, body { height: 100%; }
+  /* Прокручиваться внутри окна имеют право только настройки и лист. Сам
+     документ — никогда: иначе шапка и левая панель уезжают за край, и человек
+     остаётся один на один с картинкой без единой кнопки. overflow:hidden от
+     этого не спасает — он запрещает прокрутку мышью, но не программную
+     (scrollIntoView, перевод фокуса). Спасает position:fixed: прокручивать
+     становится нечего. */
+  html { height: 100%; overflow: hidden; }
   body {
-    margin: 0; background: var(--bg); color: var(--ink);
+    position: fixed; inset: 0; margin: 0;
+    background: var(--bg); color: var(--ink);
     font: 14px/1.5 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     display: flex; flex-direction: column; overflow: hidden;
+    overscroll-behavior: none;
     -webkit-font-smoothing: antialiased;
   }
   button, input, select { font: inherit; }
@@ -202,7 +210,7 @@
 
   .stage {
     flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
-    padding: 22px; overflow: auto; position: relative;
+    padding: 22px; overflow: auto; overscroll-behavior: contain; position: relative;
     background:
       repeating-conic-gradient(color-mix(in srgb, var(--ink) 3%, transparent) 0% 25%, transparent 0% 50%)
       50% / 22px 22px;
@@ -516,7 +524,7 @@ async function openPath(path, name) {
   state.pendingName = name || "";
   try {
     const data = await send("/sessions", "POST", {
-      file: path, password: state.password || "", ...collectJob(),
+      file: path, name: name || "", password: state.password || "", ...collectJob(),
     });
     state.sessionId = data.session_id;
     state.docName = name || data.document.name;
@@ -528,6 +536,14 @@ async function openPath(path, name) {
     guard(refreshToner());
   } catch (error) {
     if (error.code === "password_required") { showPasswordPrompt(Boolean(state.password)); return; }
+    if (error.code === "unsupported_format") {
+      // Это про файл, а не про поломку: показываем подольше и возвращаем
+      // приглашение выбрать другой.
+      banner(error.message);
+      document.getElementById("dropZone").hidden = false;
+      document.getElementById("docCard").hidden = true;
+      return;
+    }
     throw error;
   }
 }
@@ -667,12 +683,38 @@ function displayWidth() {
   return Math.max(140, natural * state.zoom);
 }
 
-/** Подгоняет уже показанную картинку под текущий размер окна. */
-function applyFitSize() {
-  if (state.zoom !== null) return;
+/** Меняет размер уже показанной картинки — без запроса к сервису.
+
+    Растр при этом растягивается браузером и на время становится мягче. Это
+    честный размен: щелчок по «+» обязан отзываться сразу, а перерисовка листа
+    в высоком разрешении занимает сотни миллисекунд, и делать её на каждый
+    щелчок значит превратить масштабирование в тормоза. */
+function applySize() {
   const image = document.getElementById("sheetImage");
+  const stage = document.getElementById("stage");
+  stage.classList.toggle("zoomed", state.zoom !== null);
   if (!image.src) return;
+
+  // Держимся за ту же точку листа, а не прыгаем в угол.
+  const anchorX = (stage.scrollLeft + stage.clientWidth / 2) / Math.max(1, stage.scrollWidth);
+  const anchorY = (stage.scrollTop + stage.clientHeight / 2) / Math.max(1, stage.scrollHeight);
+
   image.style.width = `${Math.round(displayWidth())}px`;
+
+  if (state.zoom !== null) {
+    stage.scrollLeft = anchorX * stage.scrollWidth - stage.clientWidth / 2;
+    stage.scrollTop = anchorY * stage.scrollHeight - stage.clientHeight / 2;
+  }
+}
+
+const applyFitSize = () => { if (state.zoom === null) applySize(); };
+
+let sharpenTimer = null;
+/** Просит у сервиса картинку в разрешении под текущий масштаб — с задержкой,
+    чтобы серия щелчков по «+» дала один запрос, а не десять. */
+function scheduleSharpen() {
+  clearTimeout(sharpenTimer);
+  sharpenTimer = setTimeout(() => guard(refreshPreview()), 260);
 }
 
 async function refreshPreview() {
@@ -682,6 +724,7 @@ async function refreshPreview() {
   const skeleton = document.getElementById("skeleton");
   const stage = document.getElementById("stage");
 
+  clearTimeout(sharpenTimer);
   const cssWidth = Math.round(displayWidth());
   const requested = Math.min(MAX_REQUEST_WIDTH, Math.round(cssWidth * (window.devicePixelRatio || 1)));
   const seq = ++state.seq;
@@ -759,17 +802,29 @@ function setZoom(zoom) {
   document.getElementById("zoomFit").classList.toggle("on", zoom === null);
   document.getElementById("zoomIn").disabled = zoom !== null && zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1];
   document.getElementById("zoomOut").disabled = zoom !== null && zoom <= ZOOM_STEPS[0];
-  guard(refreshPreview());
+  applySize();        // сразу
+  scheduleSharpen();  // резче — через мгновение
 }
 
 function stepZoom(direction) {
   // От «по окну» шагаем от 100 %: это понятная точка отсчёта.
   const current = state.zoom === null ? 1 : state.zoom;
-  const index = ZOOM_STEPS.findIndex((step) => step > current + 0.001);
-  const next = direction > 0
-    ? ZOOM_STEPS[index === -1 ? ZOOM_STEPS.length - 1 : index]
-    : ZOOM_STEPS[Math.max(0, (index === -1 ? ZOOM_STEPS.length : index) - 1)];
-  setZoom(next);
+
+  // Ищем текущий шаг и двигаемся на соседний. Считать «первый шаг больше
+  // текущего» нельзя: на самом крупном масштабе такого шага нет, и кнопка
+  // «мельче» переставала работать вовсе — застряв на 300 %, выйти можно было
+  // только через «вписать».
+  let index = ZOOM_STEPS.findIndex((step) => Math.abs(step - current) < 0.001);
+  if (index === -1) {
+    // Масштаб между шагами: берём ближайший в нужную сторону.
+    const forward = ZOOM_STEPS.findIndex((step) => step > current);
+    index = direction > 0
+      ? (forward === -1 ? ZOOM_STEPS.length - 1 : forward)
+      : (forward === -1 ? ZOOM_STEPS.length - 1 : Math.max(0, forward - 1));
+    setZoom(ZOOM_STEPS[index]);
+    return;
+  }
+  setZoom(ZOOM_STEPS[Math.min(ZOOM_STEPS.length - 1, Math.max(0, index + direction))]);
 }
 
 function enablePanning() {

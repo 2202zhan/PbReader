@@ -37,6 +37,7 @@ from typing import Any
 
 from .config import Config
 from .document import PdfError, PdfPasswordRequired
+from .formats import UnsupportedFormat
 from .coverage import CoverageLimits, check_limits
 from .housekeeping import Housekeeper
 from .output import JobTracker
@@ -236,6 +237,9 @@ class _Handler(BaseHTTPRequestHandler):
         except PdfPasswordRequired as exc:
             # Не поломка, а следующий шаг: окно спросит пароль и повторит.
             self._fail(HTTPStatus.UNPROCESSABLE_ENTITY, str(exc), "password_required")
+        except UnsupportedFormat as exc:
+            # Человек принёс не тот файл — это про файл, а не про нас.
+            self._fail(HTTPStatus.UNSUPPORTED_MEDIA_TYPE, str(exc), "unsupported_format")
         except (PdfError, PrinterUnavailable, ValueError, IndexError, FileNotFoundError) as exc:
             self._fail(HTTPStatus.BAD_REQUEST, str(exc))
         except Exception as exc:  # pragma: no cover
@@ -316,7 +320,10 @@ class _Handler(BaseHTTPRequestHandler):
         from .pipeline import prepare_document
 
         config: Config = self.server.config
-        pdf_path = prepare_document(str(source), config, token=body.get("device_token", ""))
+        pdf_path = prepare_document(
+            str(source), config, token=body.get("device_token", ""),
+            original_name=str(body.get("name") or ""),
+        )
         job = PrintJob.from_dict(body)
         if not job.printer:
             job = job.with_(printer=config.printer or (default_printer() if IS_WINDOWS else "") or "")

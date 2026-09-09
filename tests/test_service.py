@@ -357,3 +357,29 @@ class TestCoverageEnforcement:
         session = request(strict_service, "/sessions", "POST", {"file": str(path)})
         limits = request(strict_service, f"/sessions/{session['session_id']}/coverage")["limits"]
         assert limits == {"max_page_coverage": 0.6, "max_ink_units": 40.0, "enforce": True}
+
+
+class TestWrongFormat:
+    def test_a_book_is_refused_with_a_readable_reason(self, service, tmp_path):
+        """С аппарата приезжали файлы из чужой базы, и человек видел «Failed to
+        load document (PDFium: Data format error)». Причина была не в PDFium:
+        файлу без знакомого расширения программа сама приписывала «.pdf»."""
+        import io
+        import zipfile
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("mimetype", "application/epub+zip")
+        book = tmp_path / "398baa78-8451-451c.pdf"
+        book.write_bytes(buffer.getvalue())
+
+        with pytest.raises(urllib.error.HTTPError) as error:
+            request(service, "/sessions", "POST", {"file": str(book), "name": book.name})
+        body = json.loads(error.value.read())
+        assert error.value.code == 415
+        assert body["code"] == "unsupported_format"
+        assert "EPUB" in body["error"]
+
+    def test_a_real_pdf_still_opens(self, service, make_pdf):
+        path = make_pdf([(A4.size.width, A4.size.height, 0)])
+        assert request(service, "/sessions", "POST", {"file": str(path)})["document"]["page_count"] == 1

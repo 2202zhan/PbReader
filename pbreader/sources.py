@@ -30,7 +30,14 @@ class DownloadError(RuntimeError):
 
 
 def sanitize_filename(filename: str) -> str:
-    """Приводит имя файла к безопасному виду, сохраняя расширение."""
+    """Приводит имя файла к безопасному виду, СОХРАНЯЯ его расширение.
+
+    Раньше любое незнакомое расширение заменялось на «.pdf». Это было прямой
+    ложью: книга .epub из чужой базы становилась «книга.pdf», а человек получал
+    «Data format error» вместо «это не PDF». Формат теперь определяется по
+    содержимому (pbreader.formats), поэтому имени врать незачем — оно нужно
+    только чтобы файл безопасно лёг на диск.
+    """
     try:
         filename = urllib.parse.unquote(filename, encoding="utf-8")
     except UnicodeDecodeError:
@@ -38,7 +45,10 @@ def sanitize_filename(filename: str) -> str:
 
     base, ext = os.path.splitext(os.path.basename(filename))
     safe_base = re.sub(r"[^\w\d-]", "_", base)[:100] or f"document_{uuid.uuid4().hex[:8]}"
-    safe_ext = ext.lower() if ext.lower() in SUPPORTED_EXTENSIONS else ".pdf"
+    # Расширение оставляем настоящим, но только если оно похоже на расширение:
+    # точка плюс несколько букв или цифр. Всё остальное отбрасываем — имя не
+    # должно быть способом что-то протащить в файловую систему.
+    safe_ext = ext.lower() if re.fullmatch(r"\.[a-z0-9]{1,8}", ext.lower()) else ""
     return f"{safe_base}{safe_ext}"
 
 

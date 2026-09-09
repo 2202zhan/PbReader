@@ -58,7 +58,35 @@ class TestLayout:
         превращается в none и лист вылезает за нижний край окна."""
         page = INDEX_HTML.read_text(encoding="utf-8")
         assert "image.style.width = `${cssWidth}px`" in page
-        assert "function applyFitSize" in page
+        assert "function applySize" in page
+
+    def test_the_document_itself_can_never_scroll(self):
+        """Прокручиваться внутри окна имеют право только настройки и лист.
+
+        Если уедет сам документ, шапка и левая панель уйдут за край, и человек
+        останется один на один с картинкой без единой кнопки. overflow:hidden
+        от этого не спасает: он запрещает прокрутку мышью, но не программную —
+        от scrollIntoView или перевода фокуса. Спасает position:fixed.
+        """
+        page = INDEX_HTML.read_text(encoding="utf-8")
+        assert "html { height: 100%; overflow: hidden; }" in page
+        assert "position: fixed; inset: 0;" in page
+
+    def test_zoom_redraws_immediately_and_sharpens_later(self):
+        """Щелчок по «+» обязан отзываться сразу: перерисовка листа в высоком
+        разрешении занимает сотни миллисекунд, и делать её на каждый щелчок
+        значит превратить масштабирование в тормоза."""
+        page = INDEX_HTML.read_text(encoding="utf-8")
+        assert "scheduleSharpen" in page
+        assert "applySize();        // сразу" in page
+
+    def test_zoom_steps_do_not_get_stuck_at_the_limits(self):
+        """На 300 % кнопка «мельче» переставала работать: шаг искался как
+        «первый больше текущего», а на самом крупном масштабе такого нет.
+        Выйти можно было только через «вписать»."""
+        page = INDEX_HTML.read_text(encoding="utf-8")
+        assert "Math.min(ZOOM_STEPS.length - 1, Math.max(0, index + direction))" in page
+        assert "ZOOM_STEPS[index === -1 ? ZOOM_STEPS.length - 1 : index]" not in page
 
     def test_thumbnails_are_loaded_lazily(self):
         """У документа в сотню листов сотня запросов разом положила бы и
