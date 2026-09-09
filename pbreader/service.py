@@ -43,7 +43,16 @@ from .output import JobTracker
 from .ui import render_ui_page
 from .job import PrintJob
 from .preview import DEFAULT_PREVIEW_WIDTH
-from .printers import IS_WINDOWS, PrinterUnavailable, describe, default_printer, list_printers
+from .printers import (
+    IS_WINDOWS,
+    PrinterUnavailable,
+    default_printer,
+    describe,
+    list_printers,
+    preflight,
+    read_telemetry,
+    resolve_snmp_host,
+)
 from .session import SessionExpired, SessionStore
 
 logger = logging.getLogger(__name__)
@@ -228,6 +237,12 @@ class _Handler(BaseHTTPRequestHandler):
             if path == "/printer-state" and method == "GET":
                 return self._printer_state(query)
 
+            if path == "/telemetry" and method == "GET":
+                return self._telemetry(query)
+
+            if path == "/preflight" and method == "GET":
+                return self._preflight(query)
+
             self._fail(HTTPStatus.NOT_FOUND, f"Нет такого метода: {method} {path}")
         except ServiceError as exc:
             self._fail(exc.status, exc.message, exc.code)
@@ -380,8 +395,18 @@ class _Handler(BaseHTTPRequestHandler):
         # показать замятие или конец бумаги, а не отчитаться об успехе.
         status = None
         if result.job_id:
+            config = self.server.config
             status = self.server.jobs.register(
-                result.job_id, result.printer, result.pages_sent, session.document.path.name
+                result.job_id,
+                result.printer,
+                result.pages_sent,
+                session.document.path.name,
+                # Счётчик механизма снимается прямо сейчас: после него ответ
+                # «напечатано» перестанет быть догадкой.
+                snmp_host=self._snmp_host(result.printer),
+                community=config.snmp_community,
+                expected_sheets=result.sheets,
+                snmp_timeout=config.snmp_timeout,
             ).to_dict()
 
         return self._json({"submitted": True, "status": status, **asdict(result)})
@@ -400,6 +425,42 @@ class _Handler(BaseHTTPRequestHandler):
                 "enforce": limits.enforce,
             },
         })
+
+    def _snmp_host(self, printer: str) -> str | None:
+        config = self.server.config
+        if not config.snmp_enabled:
+            return None
+        return resolve_snmp_host(printer, config.snmp_host)
+
+    def _telemetry(self, query: dict[str, list[str]]) -> None:
+        """Что аппарат рассказывает о себе: счётчик, бумага, тонер, неполадки."""
+        config = self.server.config
+        printer = (query.get("printer") or [config.printer or (default_printer() if IS_WINDOWS else "")])[0]
+        if not printer:
+            raise ServiceError(HTTPStatus.BAD_REQUEST, "Не указан принтер", "no_printer")
+        if not config.snmp_enabled:
+            return self._json({"reachable": False, "error": "Опрос по сети выключен в настройках"})
+        info = read_telemetry(
+            printer, community=config.snmp_community,
+            host=config.snmp_host, timeout=config.snmp_timeout,
+        )
+        return self._json({"printer": printer, **info.to_dict()})
+
+    def _preflight(self, query: dict[str, list[str]]) -> None:
+        """Можно ли принимать оплату: готов ли аппарат, есть ли бумага и тонер."""
+        config = self.server.config
+        printer = (query.get("printer") or [config.printer or (default_printer() if IS_WINDOWS else "")])[0]
+        if not printer:
+            raise ServiceError(HTTPStatus.BAD_REQUEST, "Не указан принтер", "no_printer")
+        tray_raw = (query.get("tray") or [""])[0]
+        result = preflight(
+            printer,
+            tray=int(tray_raw) if tray_raw.strip().isdigit() else None,
+            community=config.snmp_community,
+            host=config.snmp_host if config.snmp_enabled else "",
+            timeout=config.snmp_timeout,
+        )
+        return self._json(result.to_dict())
 
     def _printer_state(self, query: dict[str, list[str]]) -> None:
         """Готов ли принтер. Спросить это ДО оплаты дешевле, чем объясняться после."""
