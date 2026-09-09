@@ -35,6 +35,17 @@ MAX_PREVIEW_WIDTH = 2400
 #: буквы и слабая заливка тоже краска, а вот шум растеризации в 253 — уже нет.
 INK_THRESHOLD = 250
 
+#: Доля тёмных пикселей, начиная с которой обрезка считается настоящей потерей.
+#: Одиночные точки на границе — это сглаживание, а не потерянный текст.
+#: Замеры: у документа, где терять нечего, за границей 0 %; у вылезающего —
+#: от 2.7 % при любом размере картинки. Порог с запасом в двадцать раз.
+INK_LOSS_FRACTION = 0.001
+
+#: Полоска у самой границы области печати не проверяется: при уменьшении
+#: картинки сглаживание размазывает содержимое на пиксель наружу, и без этого
+#: запаса маленький предпросмотр объявлял потерю там, где её нет.
+BLEED_DIVISOR = 250
+
 _PAPER_BORDER = (176, 178, 182)
 _MARGIN_GUIDE = (176, 178, 182)
 _CLIP_WARNING = (214, 69, 69)
@@ -66,15 +77,20 @@ class SheetPreview:
         return data
 
 
-def _has_ink(image: Image.Image, box: tuple[int, int, int, int]) -> bool:
-    """Есть ли в области хоть что-то, кроме белого."""
+def _count_ink(image: Image.Image, box: tuple[int, int, int, int]) -> int:
+    """Сколько в области тёмных пикселей."""
     left, top, right, bottom = box
     left, top = max(0, left), max(0, top)
     right, bottom = min(image.width, right), min(image.height, bottom)
     if right <= left or bottom <= top:
-        return False
+        return 0
     region = image.crop((left, top, right, bottom)).convert("L")
-    return region.getextrema()[0] < INK_THRESHOLD
+    return sum(region.histogram()[:INK_THRESHOLD])
+
+
+def _has_ink(image: Image.Image, box: tuple[int, int, int, int]) -> bool:
+    """Есть ли в области хоть что-то, кроме белого."""
+    return _count_ink(image, box) > 0
 
 
 def _fade(image: Image.Image, keep: tuple[int, int, int, int]) -> None:
@@ -206,14 +222,22 @@ def _ink_lost(page: Image.Image, dest_px: tuple[int, int, int, int], printable_p
     напечатанная один к одному, ВСЕГДА выходит на непечатаемые поля — там
     просто ничего нет. Ругаться на это каждый раз значит приучить человека не
     читать предупреждения.
+
+    Ответ обязан быть одинаковым при любом размере картинки: один и тот же
+    документ не может «терять текст» в миниатюре и не терять в полном виде.
+    Поэтому у границы оставляется запас на сглаживание, а редкие одиночные
+    точки не считаются потерей.
     """
     left, top, width, height = dest_px
-    # Печатаемая область в координатах самого растра страницы.
+    bleed = max(1, round(max(page.width, page.height) / BLEED_DIVISOR))
+
+    # Печатаемая область в координатах самого растра страницы, расширенная на
+    # запас: то, что попало в этот запас, — след сглаживания, а не потеря.
     keep = (
-        max(0, printable_px[0] - left),
-        max(0, printable_px[1] - top),
-        min(page.width, printable_px[2] - left),
-        min(page.height, printable_px[3] - top),
+        max(0, printable_px[0] - left) - bleed,
+        max(0, printable_px[1] - top) - bleed,
+        min(page.width, printable_px[2] - left) + bleed,
+        min(page.height, printable_px[3] - top) + bleed,
     )
     if keep[2] <= keep[0] or keep[3] <= keep[1]:
         # Не видно вообще ничего — потеряется всё, что на странице нарисовано.
@@ -225,7 +249,8 @@ def _ink_lost(page: Image.Image, dest_px: tuple[int, int, int, int], printable_p
         (0, keep[1], keep[0], keep[3]),
         (keep[2], keep[1], page.width, keep[3]),
     )
-    return any(_has_ink(page, strip) for strip in strips)
+    lost = sum(_count_ink(page, strip) for strip in strips)
+    return lost > page.width * page.height * INK_LOSS_FRACTION
 
 
 def describe_job(

@@ -28,7 +28,8 @@ class TestPage:
 
     @pytest.mark.parametrize("element", ["dropZone", "printer", "tray", "duplex", "orientation",
                                          "color", "scale", "pages", "copies", "printBtn",
-                                         "sheetImage", "sideTabs"])
+                                         "sheetImage", "sideTabs", "rail", "zoomIn", "zoomOut",
+                                         "zoomFit", "skeleton", "summary"])
     def test_controls_are_in_place(self, element):
         assert f'id="{element}"' in INDEX_HTML.read_text(encoding="utf-8")
 
@@ -37,3 +38,29 @@ class TestPage:
         без !important спрятанные блоки остаются видимыми."""
         page = INDEX_HTML.read_text(encoding="utf-8")
         assert "[hidden] { display: none !important; }" in page
+
+
+class TestLayout:
+    """Правила разметки, нарушение которых видно только на живом экране."""
+
+    def test_print_button_lives_outside_the_scrolling_area(self):
+        """На аппарате кнопка «Печать» уезжала за нижний край: настройки не
+        помещались в окно. Теперь она в отдельной панели снизу, а прокручивается
+        только список настроек."""
+        page = INDEX_HTML.read_text(encoding="utf-8")
+        settings = page.index('class="settings"')
+        actions = page.index('class="actions"')
+        button = page.index('id="printBtn"')
+        assert settings < actions < button, "кнопка должна быть в нижней панели, а не в прокрутке"
+
+    def test_sheet_size_is_set_in_pixels_not_percent(self):
+        """У обёртки картинки нет заданной высоты, поэтому max-height:100%
+        превращается в none и лист вылезает за нижний край окна."""
+        page = INDEX_HTML.read_text(encoding="utf-8")
+        assert "image.style.width = `${cssWidth}px`" in page
+        assert "function applyFitSize" in page
+
+    def test_thumbnails_are_loaded_lazily(self):
+        """У документа в сотню листов сотня запросов разом положила бы и
+        сервис, и терпение."""
+        assert "IntersectionObserver" in INDEX_HTML.read_text(encoding="utf-8")

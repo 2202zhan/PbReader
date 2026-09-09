@@ -8,13 +8,14 @@
 <style>
   :root {
     color-scheme: light dark;
-    --bg: #f4f5f7;
+    --bg: #eef0f3;
     --panel: #ffffff;
-    --panel-2: #fafbfc;
+    --panel-2: #f6f7f9;
     --ink: #1c1f23;
     --ink-soft: #5b6570;
     --ink-faint: #8b949e;
     --line: #dfe3e8;
+    --line-soft: #ebeef1;
     --accent: #2f6fd0;
     --accent-ink: #ffffff;
     --warn-bg: #fdf3e7;
@@ -25,12 +26,13 @@
     --ok: #2c8a5a;
     --radius: 10px;
     --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 6px 20px rgba(16, 24, 40, .05);
+    --sidebar: 336px;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #16181c; --panel: #1e2126; --panel-2: #24282e;
+      --bg: #131519; --panel: #1c1f24; --panel-2: #23272d;
       --ink: #e8eaed; --ink-soft: #a5adb8; --ink-faint: #79828d;
-      --line: #333840; --accent: #4b8ae8; --accent-ink: #0d1013;
+      --line: #333840; --line-soft: #2a2e35; --accent: #4b8ae8; --accent-ink: #0d1013;
       --warn-bg: #2e2517; --warn-ink: #e8be7d; --warn-line: #55442a;
       --danger: #e57373; --danger-bg: #2e1c1c; --ok: #5cb98a;
       --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.25);
@@ -45,12 +47,14 @@
     margin: 0; background: var(--bg); color: var(--ink);
     font: 14px/1.5 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     display: flex; flex-direction: column; overflow: hidden;
+    -webkit-font-smoothing: antialiased;
   }
+  button, input, select { font: inherit; }
 
+  /* ---------- шапка ---------- */
   header {
-    display: flex; align-items: center; gap: 12px;
-    padding: 10px 18px; background: var(--panel); border-bottom: 1px solid var(--line);
-    flex: none;
+    display: flex; align-items: center; gap: 12px; flex: none;
+    padding: 9px 16px; background: var(--panel); border-bottom: 1px solid var(--line);
   }
   .brand { font-weight: 650; letter-spacing: -.01em; font-size: 15px; }
   .brand span { color: var(--ink-faint); font-weight: 400; margin-left: 8px; font-size: 13px; }
@@ -59,26 +63,32 @@
     font-size: 12px; color: var(--ink-soft); background: var(--panel-2);
     border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px;
   }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
   .dot.off { background: var(--ink-faint); }
 
   main { flex: 1; display: flex; min-height: 0; }
 
+  /* ---------- боковая панель ---------- */
   aside {
-    width: 344px; flex: none; background: var(--panel); border-right: 1px solid var(--line);
-    overflow-y: auto; padding: 16px 16px 24px;
+    width: var(--sidebar); flex: none; background: var(--panel);
+    border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0;
   }
-  aside h2 {
-    font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
-    color: var(--ink-faint); margin: 20px 0 9px; font-weight: 600;
-  }
-  aside h2:first-child { margin-top: 0; }
+  .settings { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 14px 16px 8px; }
+  .settings::-webkit-scrollbar { width: 10px; }
+  .settings::-webkit-scrollbar-thumb { background: var(--line); border-radius: 5px; border: 3px solid var(--panel); }
 
+  h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--ink-faint); margin: 18px 0 9px; font-weight: 600;
+  }
+  h2:first-child { margin-top: 0; }
+
+  /* ---------- документ ---------- */
   .drop {
     border: 1.5px dashed var(--line); border-radius: var(--radius); background: var(--panel-2);
-    padding: 18px 14px; text-align: center; cursor: pointer; transition: .12s;
+    padding: 20px 14px; text-align: center; cursor: pointer; transition: .12s;
   }
-  .drop:hover, .drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--panel-2)); }
+  .drop:hover, body.dragging .drop { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--panel-2)); }
   .drop .big { font-weight: 550; margin-bottom: 3px; }
   .drop .small { font-size: 12px; color: var(--ink-faint); }
   .doc {
@@ -87,112 +97,174 @@
   }
   .doc .name { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .doc .sub { font-size: 12px; color: var(--ink-faint); }
-  .doc button { margin-left: auto; }
+  .doc button { margin-left: auto; flex: none; }
 
-  .row { display: grid; grid-template-columns: 104px 1fr; align-items: center; gap: 8px; margin-bottom: 8px; }
+  /* ---------- поля ---------- */
+  .row { display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 8px; margin-bottom: 8px; }
   .row > label { font-size: 13px; color: var(--ink-soft); }
   .row.wide { grid-template-columns: 1fr; }
-  .hint { font-size: 12px; color: var(--ink-faint); margin: -3px 0 10px 112px; }
+  .hint { font-size: 12px; color: var(--ink-faint); margin: -3px 0 10px 104px; }
   .hint.full { margin-left: 0; }
 
-  select, input[type=text], input[type=number] {
-    width: 100%; padding: 7px 9px; font: inherit; color: var(--ink);
+  select, input[type=text], input[type=number], input[type=password] {
+    width: 100%; padding: 7px 9px; color: var(--ink);
     background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px;
   }
-  select:focus, input:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: -1px; }
-  input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--accent); }
-  .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-soft); margin: 4px 0 10px; }
+  select:focus-visible, input:focus-visible, button:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 1px;
+  }
+  input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--accent); flex: none; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-soft); margin: 4px 0 10px; cursor: pointer; }
 
   .seg { display: flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 2px; }
   .seg button {
-    flex: 1; padding: 6px 4px; font: inherit; font-size: 13px; border: 0; border-radius: 5px;
-    background: transparent; color: var(--ink-soft); cursor: pointer;
+    flex: 1; padding: 6px 4px; font-size: 13px; border: 0; border-radius: 5px;
+    background: transparent; color: var(--ink-soft); cursor: pointer; white-space: nowrap;
   }
   .seg button[aria-pressed=true] { background: var(--panel); color: var(--ink); font-weight: 550; box-shadow: var(--shadow); }
 
   button.act {
-    padding: 8px 14px; font: inherit; font-weight: 550; cursor: pointer;
+    padding: 8px 14px; font-weight: 550; cursor: pointer;
     border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); color: var(--ink);
   }
   button.act:hover:not(:disabled) { border-color: var(--ink-faint); }
   button.act.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
   button.act.primary:hover:not(:disabled) { filter: brightness(1.08); }
   button.act:disabled { opacity: .45; cursor: not-allowed; }
-  button.act.block { width: 100%; padding: 11px; }
+  button.act.block { width: 100%; padding: 12px; font-size: 15px; }
 
-  section { display: flex; flex-direction: column; min-width: 0; min-height: 0; flex: 1; }
-  .toolbar {
-    display: flex; align-items: center; gap: 10px; padding: 9px 16px;
-    background: var(--panel); border-bottom: 1px solid var(--line); flex: none;
+  /* ---------- сворачиваемый блок ---------- */
+  details.more { margin-top: 4px; border-top: 1px solid var(--line-soft); padding-top: 10px; }
+  details.more > summary {
+    cursor: pointer; list-style: none; font-size: 13px; color: var(--ink-soft);
+    display: flex; align-items: center; gap: 6px; user-select: none; margin-bottom: 10px;
   }
-  .nav { display: flex; align-items: center; gap: 6px; }
-  .nav button {
-    width: 30px; height: 30px; display: grid; place-items: center; font-size: 15px;
-    border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2);
-    color: var(--ink); cursor: pointer;
+  details.more > summary::-webkit-details-marker { display: none; }
+  details.more > summary::before {
+    content: "›"; display: inline-block; transition: transform .15s; font-size: 15px; color: var(--ink-faint);
   }
-  .nav button:disabled { opacity: .35; cursor: not-allowed; }
-  .counter { font-size: 13px; color: var(--ink-soft); min-width: 118px; text-align: center; }
-  .facts { margin-left: auto; display: flex; gap: 16px; font-size: 12px; color: var(--ink-faint); }
-  .facts b { color: var(--ink-soft); font-weight: 550; }
+  details.more[open] > summary::before { transform: rotate(90deg); }
 
-  .stage {
-    flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
-    padding: 24px; overflow: hidden;
-    background:
-      repeating-conic-gradient(color-mix(in srgb, var(--ink) 3%, transparent) 0% 25%, transparent 0% 50%)
-      50% / 22px 22px;
+  /* ---------- нижняя панель действий: всегда на виду ---------- */
+  .actions {
+    flex: none; padding: 12px 16px 14px; background: var(--panel);
+    border-top: 1px solid var(--line); box-shadow: 0 -6px 16px rgba(16, 24, 40, .04);
   }
-  .stage img { max-width: 100%; max-height: 100%; object-fit: contain; box-shadow: 0 2px 6px rgba(0,0,0,.14), 0 12px 34px rgba(0,0,0,.13); }
-  .empty { text-align: center; color: var(--ink-faint); max-width: 330px; }
-  .empty .big { font-size: 15px; color: var(--ink-soft); margin-bottom: 6px; }
+  .summary {
+    display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px;
+    font-size: 12px; color: var(--ink-faint);
+  }
+  .summary b { color: var(--ink-soft); font-weight: 550; }
+  .summary .cost { margin-left: auto; white-space: nowrap; }
+  .summary.heavy { color: var(--warn-ink); }
+  .summary.heavy b, .summary.heavy .cost { color: var(--warn-ink); }
+  .summary.blocked { color: var(--danger); }
+  .summary.blocked b, .summary.blocked .cost { color: var(--danger); }
 
-  .notes { flex: none; padding: 0 16px 12px; background: var(--panel); border-top: 1px solid var(--line); }
-  .note {
-    display: flex; gap: 9px; align-items: flex-start; margin-top: 12px; padding: 9px 12px;
-    font-size: 13px; border-radius: 8px; background: var(--warn-bg); color: var(--warn-ink);
-    border: 1px solid var(--warn-line);
-  }
-  .note.bad { background: var(--danger-bg); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
-  .note .mark { font-weight: 700; line-height: 1.35; }
-
-  .lock {
-    margin-top: 10px; padding: 12px; border-radius: var(--radius);
-    background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn-ink);
-  }
-  .lock-title { font-weight: 550; font-size: 13px; margin-bottom: 8px; }
-  .lock-row { display: flex; gap: 8px; }
-  .lock-row input { flex: 1; }
-  .lock-error { margin-top: 7px; font-size: 12px; color: var(--danger); }
-
-  .toner {
-    margin-top: 16px; padding: 11px 12px; border-radius: var(--radius);
-    background: var(--panel-2); border: 1px solid var(--line);
-  }
-  .toner-head { display: flex; align-items: baseline; gap: 10px; font-size: 13px; color: var(--ink-soft); }
-  .toner-head b { margin-left: auto; color: var(--ink); font-size: 14px; }
-  .toner-sub { margin-top: 3px; font-size: 12px; color: var(--ink-faint); }
-  .toner.heavy { background: var(--warn-bg); border-color: var(--warn-line); }
-  .toner.heavy .toner-head, .toner.heavy .toner-sub { color: var(--warn-ink); }
-  .toner.heavy .toner-head b { color: var(--warn-ink); }
-  .toner-alert { margin-top: 8px; font-size: 12px; line-height: 1.45; color: var(--warn-ink); }
-  .toner.blocked { background: var(--danger-bg); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
-  .toner.blocked .toner-head, .toner.blocked .toner-head b,
-  .toner.blocked .toner-sub, .toner.blocked .toner-alert { color: var(--danger); }
-
-  .job {
-    margin-top: 12px; padding: 11px 12px; border-radius: var(--radius);
-    background: var(--panel-2); border: 1px solid var(--line);
-  }
+  .job { margin-top: 10px; padding: 9px 11px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); }
   .job-head { display: flex; align-items: center; gap: 10px; }
   .job-state { font-weight: 550; font-size: 13px; }
-  .job-head button { margin-left: auto; padding: 4px 10px; font-size: 12px; }
-  .job-bar { height: 4px; margin: 9px 0 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .job-head button { margin-left: auto; padding: 3px 9px; font-size: 12px; }
+  .job-bar { height: 4px; margin: 8px 0 5px; border-radius: 3px; background: var(--line); overflow: hidden; }
   .job-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
   .job.done .job-bar i { background: var(--ok); }
   .job.bad .job-bar i { background: var(--danger); }
   .job.bad .job-state { color: var(--danger); }
   .job-sub { font-size: 12px; color: var(--ink-faint); }
+
+  /* ---------- пароль ---------- */
+  .lock { margin-top: 10px; padding: 12px; border-radius: var(--radius); background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn-ink); }
+  .lock-title { font-weight: 550; font-size: 13px; margin-bottom: 8px; }
+  .lock-row { display: flex; gap: 8px; }
+  .lock-row input { flex: 1; }
+  .lock-error { margin-top: 7px; font-size: 12px; color: var(--danger); }
+
+  /* ---------- область просмотра ---------- */
+  section { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .toolbar {
+    display: flex; align-items: center; gap: 8px; padding: 8px 14px; flex: none;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .group { display: flex; align-items: center; gap: 4px; }
+  .icon {
+    width: 30px; height: 30px; display: grid; place-items: center; font-size: 15px; line-height: 1;
+    border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2);
+    color: var(--ink); cursor: pointer; flex: none;
+  }
+  .icon:hover:not(:disabled) { border-color: var(--ink-faint); }
+  .icon:disabled { opacity: .35; cursor: not-allowed; }
+  .icon.on { background: color-mix(in srgb, var(--accent) 14%, var(--panel-2)); border-color: var(--accent); color: var(--accent); }
+  .counter { font-size: 13px; color: var(--ink-soft); min-width: 108px; text-align: center; white-space: nowrap; }
+  .zoom-value { font-size: 12px; color: var(--ink-soft); min-width: 46px; text-align: center; font-variant-numeric: tabular-nums; }
+  .sep { width: 1px; height: 20px; background: var(--line); margin: 0 3px; flex: none; }
+  .facts { margin-left: auto; display: flex; gap: 14px; font-size: 12px; color: var(--ink-faint); white-space: nowrap; overflow: hidden; }
+  .facts b { color: var(--ink-soft); font-weight: 550; }
+
+  .stage {
+    flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
+    padding: 22px; overflow: auto; position: relative;
+    background:
+      repeating-conic-gradient(color-mix(in srgb, var(--ink) 3%, transparent) 0% 25%, transparent 0% 50%)
+      50% / 22px 22px;
+  }
+  .stage.zoomed { align-items: flex-start; justify-content: flex-start; cursor: grab; }
+  .stage.zoomed.grabbing { cursor: grabbing; }
+  .paper-wrap { margin: auto; position: relative; flex: none; line-height: 0; }
+  /* Размер картинки задаётся в пикселях из JS. Проценты здесь не работают:
+     у обёртки нет заданной высоты, и max-height:100% превращается в none —
+     лист вылезал за нижний край окна. */
+  .stage img {
+    display: block; max-width: 100%; max-height: 100%; object-fit: contain;
+    box-shadow: 0 2px 6px rgba(0,0,0,.14), 0 12px 34px rgba(0,0,0,.13);
+    background: #fff;
+  }
+  .stage.zoomed img { max-width: none; max-height: none; }
+  .stage img.stale { opacity: .5; transition: opacity .15s; }
+
+  .skeleton {
+    position: absolute; inset: 0; margin: auto; border-radius: 2px;
+    background: linear-gradient(100deg, var(--panel-2) 30%, var(--panel) 50%, var(--panel-2) 70%);
+    background-size: 220% 100%; animation: sweep 1.1s ease-in-out infinite;
+    box-shadow: 0 2px 6px rgba(0,0,0,.12);
+  }
+  @keyframes sweep { from { background-position: 180% 0; } to { background-position: -80% 0; } }
+
+  .empty { text-align: center; color: var(--ink-faint); max-width: 340px; margin: auto; }
+  .empty .big { font-size: 15px; color: var(--ink-soft); margin-bottom: 6px; font-weight: 550; }
+  .empty kbd {
+    font: inherit; font-size: 11px; padding: 1px 5px; border-radius: 4px;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--ink-soft);
+  }
+
+  /* ---------- лента листов ---------- */
+  .rail {
+    flex: none; display: flex; gap: 10px; padding: 10px 14px; overflow-x: auto; overflow-y: hidden;
+    background: var(--panel); border-top: 1px solid var(--line);
+  }
+  .rail::-webkit-scrollbar { height: 8px; }
+  .rail::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+  .thumb {
+    flex: none; width: 66px; cursor: pointer; border: 0; background: transparent; padding: 0;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+  }
+  .thumb .sheetbox {
+    width: 66px; height: 93px; border-radius: 3px; background: var(--panel-2);
+    border: 1px solid var(--line); overflow: hidden; display: grid; place-items: center;
+  }
+  .thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .thumb .no { font-size: 11px; color: var(--ink-faint); }
+  .thumb[aria-current=true] .sheetbox { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
+  .thumb[aria-current=true] .no { color: var(--accent); font-weight: 600; }
+
+  /* ---------- предупреждения ---------- */
+  .notes { flex: none; padding: 0 14px 10px; background: var(--panel); }
+  .note {
+    display: flex; gap: 9px; align-items: flex-start; margin-top: 10px; padding: 8px 11px;
+    font-size: 13px; border-radius: 8px; background: var(--warn-bg); color: var(--warn-ink);
+    border: 1px solid var(--warn-line);
+  }
+  .note.bad { background: var(--danger-bg); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
+  .note .mark { font-weight: 700; line-height: 1.35; flex: none; }
 
   .banner {
     position: fixed; left: 50%; transform: translateX(-50%); bottom: 20px; z-index: 20;
@@ -201,12 +273,9 @@
     border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); font-size: 13px;
   }
   .banner.ok { background: var(--panel); color: var(--ink); border-color: var(--line); }
-  .banner[hidden] { display: none; }
 
-  .busy { position: relative; }
-  .busy::after {
-    content: ""; position: absolute; inset: 0; background: color-mix(in srgb, var(--bg) 55%, transparent);
-  }
+  /* Экраны киосков бывают невысокими: там лента листов только мешает. */
+  @media (max-height: 720px) { .rail { display: none; } }
 </style>
 </head>
 <body>
@@ -218,114 +287,120 @@
 
 <main>
   <aside>
-    <h2>Документ</h2>
-    <div id="dropZone" class="drop">
-      <div class="big">Перетащите PDF сюда</div>
-      <div class="small">или нажмите, чтобы выбрать файл</div>
-    </div>
-    <div id="docCard" class="doc" hidden>
-      <div style="min-width:0">
-        <div class="name" id="docName"></div>
-        <div class="sub" id="docSub"></div>
+    <div class="settings">
+      <h2>Документ</h2>
+      <div id="dropZone" class="drop">
+        <div class="big">Перетащите файл сюда</div>
+        <div class="small">или нажмите, чтобы выбрать — PDF, Word, Excel, PowerPoint</div>
       </div>
-      <button class="act" id="docChange">Другой</button>
-    </div>
-    <input type="file" id="filePicker" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" hidden>
-
-    <div id="passwordPanel" class="lock" hidden>
-      <div class="lock-title">Документ защищён паролем</div>
-      <div class="lock-row">
-        <input type="password" id="password" placeholder="пароль" autocomplete="off">
-        <button class="act" id="passwordOpen">Открыть</button>
+      <div id="docCard" class="doc" hidden>
+        <div style="min-width:0">
+          <div class="name" id="docName"></div>
+          <div class="sub" id="docSub"></div>
+        </div>
+        <button class="act" id="docChange">Другой</button>
       </div>
-      <div class="lock-error" id="passwordError" hidden>Пароль не подошёл</div>
-    </div>
+      <input type="file" id="filePicker" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" hidden>
 
-    <h2>Принтер</h2>
-    <div class="row wide"><select id="printer"></select></div>
-    <div class="row"><label for="tray">Лоток</label><select id="tray"></select></div>
-    <div class="hint" id="printerHint"></div>
-
-    <h2>Параметры</h2>
-    <div class="row"><label for="copies">Копии</label><input type="number" id="copies" min="1" max="999" value="1"></div>
-    <label class="check"><input type="checkbox" id="collate" checked> Подбирать по копиям</label>
-
-    <div class="row"><label>Стороны</label>
-      <div class="seg" id="duplex">
-        <button data-value="simplex" aria-pressed="true">Одна</button>
-        <button data-value="long-edge" aria-pressed="false">Длинная</button>
-        <button data-value="short-edge" aria-pressed="false">Короткая</button>
+      <div id="passwordPanel" class="lock" hidden>
+        <div class="lock-title">Документ защищён паролем</div>
+        <div class="lock-row">
+          <input type="password" id="password" placeholder="пароль" autocomplete="off">
+          <button class="act" id="passwordOpen">Открыть</button>
+        </div>
+        <div class="lock-error" id="passwordError" hidden>Пароль не подошёл</div>
       </div>
-    </div>
-    <div class="row"><label>Ориентация</label>
-      <div class="seg" id="orientation">
-        <button data-value="portrait" aria-pressed="true">Книжная</button>
-        <button data-value="landscape" aria-pressed="false">Альбомная</button>
-        <button data-value="auto" aria-pressed="false">Авто</button>
+
+      <h2>Принтер</h2>
+      <div class="row wide"><select id="printer"></select></div>
+      <div class="row"><label for="tray">Лоток</label><select id="tray"></select></div>
+      <div class="hint" id="printerHint"></div>
+
+      <h2>Параметры</h2>
+      <div class="row"><label for="copies">Копии</label><input type="number" id="copies" min="1" max="999" value="1"></div>
+      <div class="row"><label>Стороны</label>
+        <div class="seg" id="duplex">
+          <button data-value="simplex" aria-pressed="true">Одна</button>
+          <button data-value="long-edge" aria-pressed="false">Длинная</button>
+          <button data-value="short-edge" aria-pressed="false">Короткая</button>
+        </div>
       </div>
-    </div>
-    <div class="row"><label>Цвет</label>
-      <div class="seg" id="color">
-        <button data-value="monochrome" aria-pressed="true">Ч/б</button>
-        <button data-value="color" aria-pressed="false">Цветная</button>
+      <div class="row"><label>Ориентация</label>
+        <div class="seg" id="orientation">
+          <button data-value="portrait" aria-pressed="true">Книжная</button>
+          <button data-value="landscape" aria-pressed="false">Альбомная</button>
+          <button data-value="auto" aria-pressed="false">Авто</button>
+        </div>
       </div>
-    </div>
-
-    <div class="row"><label for="scale">Масштаб</label>
-      <select id="scale">
-        <option value="auto">Авто — совпал формат 1:1, иначе вписать</option>
-        <option value="actual">Как есть (100 %)</option>
-        <option value="fit">Вписать в лист</option>
-        <option value="shrink">Уменьшить, если не влезает</option>
-        <option value="fill">Заполнить лист</option>
-        <option value="custom">Свой процент</option>
-      </select>
-    </div>
-    <div class="row" id="percentRow" hidden>
-      <label for="scalePercent">Процент</label>
-      <input type="number" id="scalePercent" min="1" max="1000" value="100">
-    </div>
-
-    <div class="row"><label for="paper">Бумага</label>
-      <select id="paper"><option>A4</option><option>A3</option><option>A5</option><option>Letter</option><option>Legal</option></select>
-    </div>
-    <div class="row"><label for="pages">Страницы</label><input type="text" id="pages" placeholder="все"></div>
-    <div class="hint">Например: 1,3,5-8,12-</div>
-    <label class="check"><input type="checkbox" id="autoRotate"> Доворачивать страницу, если так крупнее</label>
-
-    <div id="tonerPanel" class="toner" hidden>
-      <div class="toner-head">
-        <span>Расход тонера</span>
-        <b id="tonerUnits">—</b>
+      <div class="row"><label>Цвет</label>
+        <div class="seg" id="color">
+          <button data-value="monochrome" aria-pressed="true">Ч/б</button>
+          <button data-value="color" aria-pressed="false">Цветная</button>
+        </div>
       </div>
-      <div class="toner-sub" id="tonerSub"></div>
-      <div class="toner-alert" id="tonerAlert" hidden></div>
+      <div class="row"><label for="pages">Страницы</label><input type="text" id="pages" placeholder="все"></div>
+      <div class="hint">Например: 1,3,5-8,12-</div>
+
+      <details class="more" id="advanced">
+        <summary>Дополнительно</summary>
+        <div class="row"><label for="scale">Масштаб</label>
+          <select id="scale">
+            <option value="auto">Авто — совпал формат 1:1, иначе вписать</option>
+            <option value="actual">Как есть (100 %)</option>
+            <option value="fit">Вписать в лист</option>
+            <option value="shrink">Уменьшить, если не влезает</option>
+            <option value="fill">Заполнить лист</option>
+            <option value="custom">Свой процент</option>
+          </select>
+        </div>
+        <div class="row" id="percentRow" hidden>
+          <label for="scalePercent">Процент</label>
+          <input type="number" id="scalePercent" min="1" max="1000" value="100">
+        </div>
+        <div class="row"><label for="paper">Бумага</label>
+          <select id="paper"><option>A4</option><option>A3</option><option>A5</option><option>Letter</option><option>Legal</option></select>
+        </div>
+        <label class="check"><input type="checkbox" id="collate" checked> Подбирать по копиям</label>
+        <label class="check"><input type="checkbox" id="autoRotate"> Доворачивать страницу, если так крупнее</label>
+      </details>
     </div>
 
-    <div style="margin-top:18px">
+    <div class="actions">
+      <div class="summary" id="summary" hidden>
+        <span id="summarySheets"></span>
+        <span class="cost" id="summaryCost"></span>
+      </div>
       <button class="act primary block" id="printBtn" disabled>Печать</button>
-    </div>
+      <div id="tonerAlert" class="note bad" hidden></div>
 
-    <div id="jobPanel" class="job" hidden>
-      <div class="job-head">
-        <span class="job-state" id="jobState">…</span>
-        <button class="act" id="jobCancel">Отменить</button>
+      <div id="jobPanel" class="job" hidden>
+        <div class="job-head">
+          <span class="job-state" id="jobState">…</span>
+          <button class="act" id="jobCancel">Отменить</button>
+        </div>
+        <div class="job-bar"><i id="jobBar"></i></div>
+        <div class="job-sub" id="jobSub"></div>
       </div>
-      <div class="job-bar"><i id="jobBar"></i></div>
-      <div class="job-sub" id="jobSub"></div>
     </div>
   </aside>
 
   <section>
     <div class="toolbar">
-      <div class="nav">
-        <button id="prevSheet" title="Предыдущий лист">&#8249;</button>
+      <div class="group">
+        <button class="icon" id="prevSheet" title="Предыдущий лист (←)">‹</button>
         <div class="counter" id="sheetCounter">лист —</div>
-        <button id="nextSheet" title="Следующий лист">&#8250;</button>
+        <button class="icon" id="nextSheet" title="Следующий лист (→)">›</button>
       </div>
-      <div class="seg" id="sideTabs" style="width:170px" hidden>
+      <div class="sep"></div>
+      <div class="seg" id="sideTabs" style="width:150px" hidden>
         <button data-value="front" aria-pressed="true">Лицо</button>
         <button data-value="back" aria-pressed="false">Оборот</button>
+      </div>
+      <div class="group">
+        <button class="icon" id="zoomOut" title="Мельче (−)">−</button>
+        <div class="zoom-value" id="zoomValue">по окну</div>
+        <button class="icon" id="zoomIn" title="Крупнее (+)">+</button>
+        <button class="icon" id="zoomFit" title="Вписать в окно (0)">⤢</button>
       </div>
       <div class="facts" id="facts"></div>
     </div>
@@ -335,11 +410,16 @@
         <div class="big">Откройте документ</div>
         <div>Здесь появится лист таким, каким он выйдет из аппарата: с полями принтера,
              применённым масштабом и поворотом, в чёрно-белом виде — если выбрано ч/б.</div>
+        <div style="margin-top:10px"><kbd>←</kbd> <kbd>→</kbd> листы · <kbd>+</kbd> <kbd>−</kbd> масштаб · <kbd>Ctrl</kbd>+<kbd>P</kbd> печать</div>
       </div>
-      <img id="sheetImage" hidden alt="Предпросмотр листа">
+      <div class="paper-wrap" id="paperWrap" hidden>
+        <img id="sheetImage" alt="Предпросмотр листа">
+      </div>
+      <div class="skeleton" id="skeleton" hidden></div>
     </div>
 
     <div class="notes" id="notes"></div>
+    <div class="rail" id="rail" hidden></div>
   </section>
 </main>
 
@@ -347,6 +427,10 @@
 
 <script>
 const TOKEN = "__PBREADER_TOKEN__";
+
+const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3];
+const MAX_REQUEST_WIDTH = 2400;   // столько же принимает сервис
+
 const state = {
   sessionId: null,
   describe: null,
@@ -356,11 +440,14 @@ const state = {
   docName: "",
   previewUrl: null,
   seq: 0,
+  zoom: null,          // null — «по окну»
   pendingPath: null,
   pendingName: "",
   password: null,
   jobId: null,
   jobTimer: null,
+  thumbs: new Map(),
+  blocked: false,
 };
 
 /* ---------- обращения к сервису ---------- */
@@ -385,9 +472,9 @@ async function api(path, options = {}) {
 }
 
 const json = async (path, options) => (await api(path, options)).json();
-
 const send = (path, method, body) =>
   json(path, { method, body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
+const guard = (promise) => promise.catch((error) => banner(error.message));
 
 function banner(message, kind = "bad") {
   const element = document.getElementById("banner");
@@ -398,7 +485,7 @@ function banner(message, kind = "bad") {
   banner.timer = setTimeout(() => { element.hidden = true; }, kind === "ok" ? 3500 : 8000);
 }
 
-/* ---------- сбор параметров ---------- */
+/* ---------- параметры ---------- */
 
 const value = (id) => document.getElementById(id).value;
 const checked = (id) => document.getElementById(id).checked;
@@ -440,10 +527,7 @@ async function openPath(path, name) {
     await refreshPreview();
     guard(refreshToner());
   } catch (error) {
-    if (error.code === "password_required") {
-      showPasswordPrompt(Boolean(state.password));
-      return;
-    }
+    if (error.code === "password_required") { showPasswordPrompt(Boolean(state.password)); return; }
     throw error;
   }
 }
@@ -464,16 +548,11 @@ function hidePasswordPrompt() {
 
 function submitPassword() {
   state.password = document.getElementById("password").value;
-  if (!state.password) return;
-  guard(openPath(state.pendingPath, state.pendingName));
+  if (state.password) guard(openPath(state.pendingPath, state.pendingName));
 }
 
 async function uploadFile(file) {
-  state.password = null;
-  state.jobId = null;
-  clearTimeout(state.jobTimer);
-  document.getElementById("jobPanel").hidden = true;
-  document.getElementById("tonerPanel").hidden = true;
+  resetForNewDocument();
   const response = await api("/upload", {
     method: "POST",
     body: file,
@@ -483,7 +562,18 @@ async function uploadFile(file) {
   await openPath(path, file.name);
 }
 
-/* ---------- обновление ---------- */
+function resetForNewDocument() {
+  state.password = null;
+  state.jobId = null;
+  state.zoom = null;
+  clearTimeout(state.jobTimer);
+  state.thumbs.clear();
+  document.getElementById("jobPanel").hidden = true;
+  document.getElementById("tonerAlert").hidden = true;
+  document.getElementById("rail").innerHTML = "";
+}
+
+/* ---------- обновление задания ---------- */
 
 let patchTimer = null;
 function scheduleUpdate() {
@@ -505,10 +595,11 @@ async function pushJob() {
 }
 
 function applyDescribe(data) {
+  const previous = state.describe;
   state.describe = data;
   const sheets = data.sheet_count;
   if (state.sheet > sheets) state.sheet = sheets;
-  if (!data.job.duplex || data.job.duplex === "simplex") state.side = "front";
+  if (data.job.duplex === "simplex") state.side = "front";
 
   document.getElementById("docCard").hidden = false;
   document.getElementById("dropZone").hidden = true;
@@ -517,15 +608,36 @@ function applyDescribe(data) {
     `${data.document.page_count} стр. → ${sheets} ${plural(sheets, "лист", "листа", "листов")}`;
 
   document.getElementById("sideTabs").hidden = data.job.duplex === "simplex";
-  document.getElementById("printBtn").disabled = !state.windows;
+  syncSide();
+  updatePrintButton();
 
   const margins = data.paper.margins_mm;
   document.getElementById("facts").innerHTML = [
-    `бумага <b>${data.paper.name} ${data.paper.width_mm}×${data.paper.height_mm} мм</b>`,
-    `масштаб <b>${data.scale.percent} %</b> · ${data.scale.mode}`,
+    `бумага <b>${data.paper.name}</b>`,
+    `масштаб <b>${data.scale.percent} %</b>`,
     `поля <b>${margins.top} / ${margins.right} / ${margins.bottom} / ${margins.left} мм</b>` +
       (data.paper.margins_measured ? "" : " <b title='принтер недоступен, поля типовые'>≈</b>"),
   ].map((fact) => `<span>${fact}</span>`).join("");
+
+  document.getElementById("summary").hidden = false;
+  document.getElementById("summarySheets").innerHTML =
+    `<b>${sheets}</b> ${plural(sheets, "лист", "листа", "листов")}` +
+    (data.job.copies > 1 ? ` · ${data.job.copies} копии` : "");
+
+  // Перестраиваем ленту, только когда изменился сам набор листов.
+  const signature = `${sheets}|${data.job.duplex}|${JSON.stringify(data.pages)}`;
+  if (signature !== state.railSignature) {
+    state.railSignature = signature;
+    state.thumbs.clear();
+    buildRail(sheets);
+  } else if (previous && previous.job && jobLooksDifferent(previous.job, data.job)) {
+    refreshThumbs();
+  }
+}
+
+function jobLooksDifferent(before, after) {
+  return ["color", "orientation", "scale", "scale_percent", "paper", "auto_rotate"]
+    .some((key) => before[key] !== after[key]);
 }
 
 function plural(n, one, few, many) {
@@ -536,69 +648,80 @@ function plural(n, one, few, many) {
   return many;
 }
 
-async function refreshToner() {
-  if (!state.sessionId) return;
-  const panel = document.getElementById("tonerPanel");
-  try {
-    const data = await json(`/sessions/${state.sessionId}/coverage`);
-    const blocked = data.verdict.enforced && !data.verdict.allowed;
-    const heavy = data.verdict.violations.length > 0;
+/* ---------- предпросмотр ---------- */
 
-    panel.hidden = false;
-    panel.className = "toner" + (blocked ? " blocked" : heavy ? " heavy" : "");
-    document.getElementById("tonerUnits").textContent = `как ${formatUnits(data.total_ink_units)}`;
-
-    const parts = [`в среднем ${data.average_percent} %`];
-    if (data.heaviest_page) parts.push(`самая тёмная — стр. ${data.heaviest_page}, ${data.maximum_percent} %`);
-    // Выборка: у длинного документа считается не каждая страница.
-    if (!data.complete) parts.push(`оценка по ${data.measured_pages} страницам`);
-    document.getElementById("tonerSub").textContent = parts.join(" · ");
-
-    const alert = document.getElementById("tonerAlert");
-    alert.hidden = !heavy;
-    alert.textContent = data.verdict.violations.join(". ") +
-      (blocked ? ". Печать не будет выполнена." : "");
-    document.getElementById("printBtn").disabled = !state.windows || blocked;
-  } catch (error) {
-    panel.hidden = true;
-  }
+function sheetAspect() {
+  const paper = state.describe && state.describe.paper;
+  if (!paper) return 297 / 210;
+  return paper.height_mm / paper.width_mm;
 }
 
-function formatUnits(units) {
-  // При дробном количестве существительное идёт в родительном падеже
-  // единственного числа: «0,5 страницы», а не «0,5 страниц».
-  if (units < 10 && Math.round(units) !== units) {
-    return `${units.toFixed(1).replace(".", ",")} страницы`;
-  }
-  const whole = Math.round(units);
-  return `${whole} ${plural(whole, "страница", "страницы", "страниц")}`;
+/** Ширина картинки в CSS-пикселях: по окну либо по выбранному масштабу. */
+function displayWidth() {
+  const stage = document.getElementById("stage");
+  const free = { width: stage.clientWidth - 44, height: stage.clientHeight - 44 };
+  const byWindow = Math.min(free.width, free.height / sheetAspect());
+  if (state.zoom === null) return Math.max(140, byWindow);
+  // 100 % — лист в натуральную величину на экране: 96 точек на дюйм.
+  const natural = (state.describe ? state.describe.paper.width_mm : 210) / 25.4 * 96;
+  return Math.max(140, natural * state.zoom);
+}
+
+/** Подгоняет уже показанную картинку под текущий размер окна. */
+function applyFitSize() {
+  if (state.zoom !== null) return;
+  const image = document.getElementById("sheetImage");
+  if (!image.src) return;
+  image.style.width = `${Math.round(displayWidth())}px`;
 }
 
 async function refreshPreview() {
   if (!state.sessionId) return;
-  const stage = document.getElementById("stage");
   const image = document.getElementById("sheetImage");
-  const width = Math.min(2000, Math.round((stage.clientWidth - 60) * (window.devicePixelRatio || 1)));
+  const wrap = document.getElementById("paperWrap");
+  const skeleton = document.getElementById("skeleton");
+  const stage = document.getElementById("stage");
+
+  const cssWidth = Math.round(displayWidth());
+  const requested = Math.min(MAX_REQUEST_WIDTH, Math.round(cssWidth * (window.devicePixelRatio || 1)));
   const seq = ++state.seq;
 
-  stage.classList.add("busy");
+  stage.classList.toggle("zoomed", state.zoom !== null);
+  if (!image.src) {
+    skeleton.hidden = false;
+    skeleton.style.width = `${cssWidth}px`;
+    skeleton.style.height = `${Math.round(cssWidth * sheetAspect())}px`;
+  } else {
+    image.classList.add("stale");
+  }
+
   try {
     const response = await api(
-      `/sessions/${state.sessionId}/preview/${state.sheet}?side=${state.side}&width=${Math.max(200, width)}`
+      `/sessions/${state.sessionId}/preview/${state.sheet}?side=${state.side}&width=${requested}`
     );
-    if (seq !== state.seq) return;  // пока грузили, параметры успели смениться
+    if (seq !== state.seq) return;   // пока грузили, параметры успели смениться
     const meta = JSON.parse(response.headers.get("X-PbReader-Sheet") || "{}");
     const blob = await response.blob();
+    if (seq !== state.seq) return;
+
     if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
     state.previewUrl = URL.createObjectURL(blob);
     image.src = state.previewUrl;
-    image.hidden = false;
+    image.style.width = `${cssWidth}px`;
+    wrap.hidden = false;
     document.getElementById("emptyState").hidden = true;
     renderSheetInfo(meta);
+    // Предупреждения появляются уже после картинки и отбирают высоту у окна.
+    // Подгоняем размер ещё раз — растр при этом не перезапрашиваем: небольшое
+    // уменьшение уже готовой картинки незаметно, а лишний запрос заметен.
+    applyFitSize();
   } catch (error) {
     banner(error.message);
   } finally {
-    stage.classList.remove("busy");
+    if (seq === state.seq) {
+      skeleton.hidden = true;
+      image.classList.remove("stale");
+    }
   }
 }
 
@@ -607,11 +730,13 @@ function renderSheetInfo(meta) {
   const sheet = state.describe ? state.describe.sheets[state.sheet - 1] : null;
   const copyNote = sheet && state.describe.job.copies > 1 ? `, копия ${sheet.copy}` : "";
   const pageNote = meta.page ? `стр. ${meta.page}` : "чистая сторона";
-  const inkNote = meta.coverage === undefined ? "" : ` · заполнение ${Math.round(meta.coverage * 100)} %`;
+  const inkNote = meta.coverage === undefined ? "" : ` · ${Math.round(meta.coverage * 100)} %`;
+
   document.getElementById("sheetCounter").textContent =
-    `лист ${state.sheet} из ${total} · ${pageNote}${copyNote}${inkNote}`;
+    `${state.sheet} из ${total} · ${pageNote}${copyNote}${inkNote}`;
   document.getElementById("prevSheet").disabled = state.sheet <= 1;
   document.getElementById("nextSheet").disabled = state.sheet >= total;
+  markCurrentThumb();
 
   const notes = document.getElementById("notes");
   notes.innerHTML = "";
@@ -623,6 +748,170 @@ function renderSheetInfo(meta) {
     note.lastElementChild.textContent = warning;
     notes.appendChild(note);
   }
+}
+
+/* ---------- масштаб ---------- */
+
+function setZoom(zoom) {
+  state.zoom = zoom;
+  document.getElementById("zoomValue").textContent =
+    zoom === null ? "по окну" : `${Math.round(zoom * 100)} %`;
+  document.getElementById("zoomFit").classList.toggle("on", zoom === null);
+  document.getElementById("zoomIn").disabled = zoom !== null && zoom >= ZOOM_STEPS[ZOOM_STEPS.length - 1];
+  document.getElementById("zoomOut").disabled = zoom !== null && zoom <= ZOOM_STEPS[0];
+  guard(refreshPreview());
+}
+
+function stepZoom(direction) {
+  // От «по окну» шагаем от 100 %: это понятная точка отсчёта.
+  const current = state.zoom === null ? 1 : state.zoom;
+  const index = ZOOM_STEPS.findIndex((step) => step > current + 0.001);
+  const next = direction > 0
+    ? ZOOM_STEPS[index === -1 ? ZOOM_STEPS.length - 1 : index]
+    : ZOOM_STEPS[Math.max(0, (index === -1 ? ZOOM_STEPS.length : index) - 1)];
+  setZoom(next);
+}
+
+function enablePanning() {
+  const stage = document.getElementById("stage");
+  let dragging = false, startX = 0, startY = 0, left = 0, top = 0;
+
+  stage.addEventListener("pointerdown", (event) => {
+    if (state.zoom === null || event.button !== 0) return;
+    dragging = true;
+    startX = event.clientX; startY = event.clientY;
+    left = stage.scrollLeft; top = stage.scrollTop;
+    stage.classList.add("grabbing");
+    stage.setPointerCapture(event.pointerId);
+  });
+  stage.addEventListener("pointermove", (event) => {
+    if (!dragging) return;
+    stage.scrollLeft = left - (event.clientX - startX);
+    stage.scrollTop = top - (event.clientY - startY);
+  });
+  for (const name of ["pointerup", "pointercancel"]) {
+    stage.addEventListener(name, () => { dragging = false; stage.classList.remove("grabbing"); });
+  }
+  // Ctrl+колесо — привычный жест увеличения.
+  stage.addEventListener("wheel", (event) => {
+    if (!event.ctrlKey) return;
+    event.preventDefault();
+    stepZoom(event.deltaY < 0 ? 1 : -1);
+  }, { passive: false });
+}
+
+/* ---------- лента листов ---------- */
+
+function buildRail(count) {
+  const rail = document.getElementById("rail");
+  rail.innerHTML = "";
+  rail.hidden = count < 2;
+  if (count < 2) return;
+
+  for (let number = 1; number <= count; number++) {
+    const thumb = document.createElement("button");
+    thumb.className = "thumb";
+    thumb.dataset.sheet = String(number);
+    thumb.title = `Лист ${number}`;
+    thumb.innerHTML = `<span class="sheetbox"></span><span class="no">${number}</span>`;
+    thumb.onclick = () => goToSheet(number);
+    rail.appendChild(thumb);
+    observer.observe(thumb);
+  }
+  markCurrentThumb();
+}
+
+/** Миниатюры грузим только когда до них домотали: у документа в сотню листов
+    сотня запросов разом положила бы и сервис, и терпение. */
+const observer = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    if (entry.isIntersecting) {
+      loadThumb(Number(entry.target.dataset.sheet));
+      observer.unobserve(entry.target);
+    }
+  }
+}, { root: null, rootMargin: "200px" });
+
+async function loadThumb(number) {
+  if (!state.sessionId || state.thumbs.has(number)) return;
+  state.thumbs.set(number, true);
+  try {
+    const response = await api(`/sessions/${state.sessionId}/preview/${number}?side=front&width=132`);
+    const url = URL.createObjectURL(await response.blob());
+    const box = document.querySelector(`.thumb[data-sheet="${number}"] .sheetbox`);
+    if (!box) { URL.revokeObjectURL(url); return; }
+    box.innerHTML = "";
+    const image = document.createElement("img");
+    image.src = url;
+    image.alt = `Лист ${number}`;
+    box.appendChild(image);
+  } catch (_) {
+    state.thumbs.delete(number);
+  }
+}
+
+function refreshThumbs() {
+  state.thumbs.clear();
+  for (const thumb of document.querySelectorAll(".thumb")) {
+    thumb.querySelector(".sheetbox").innerHTML = "";
+    observer.observe(thumb);
+  }
+}
+
+function markCurrentThumb() {
+  for (const thumb of document.querySelectorAll(".thumb")) {
+    const current = Number(thumb.dataset.sheet) === state.sheet;
+    thumb.setAttribute("aria-current", String(current));
+    if (current) thumb.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  }
+}
+
+function goToSheet(number) {
+  const total = state.describe ? state.describe.sheet_count : 0;
+  if (number < 1 || number > total || number === state.sheet) return;
+  state.sheet = number;
+  state.side = "front";
+  syncSide();
+  guard(refreshPreview());
+}
+
+/* ---------- расход тонера ---------- */
+
+async function refreshToner() {
+  if (!state.sessionId) return;
+  const cost = document.getElementById("summaryCost");
+  const alert = document.getElementById("tonerAlert");
+  const summary = document.getElementById("summary");
+  try {
+    const data = await json(`/sessions/${state.sessionId}/coverage`);
+    const blocked = data.verdict.enforced && !data.verdict.allowed;
+    const heavy = data.verdict.violations.length > 0;
+
+    cost.textContent = `тонера как ${formatUnits(data.total_ink_units)}`;
+    cost.title = `в среднем ${data.average_percent} % заполнения` +
+      (data.complete ? "" : `, оценка по ${data.measured_pages} страницам`);
+    summary.className = "summary" + (blocked ? " blocked" : heavy ? " heavy" : "");
+
+    alert.hidden = !heavy;
+    alert.innerHTML = `<span class="mark">!</span><span></span>`;
+    alert.lastElementChild.textContent =
+      data.verdict.violations.join(". ") + (blocked ? ". Печать не будет выполнена." : "");
+
+    state.blocked = blocked;
+    updatePrintButton();
+  } catch (_) {
+    cost.textContent = "";
+  }
+}
+
+function formatUnits(units) {
+  // При дробном количестве существительное идёт в родительном падеже
+  // единственного числа: «0,5 страницы», а не «0,5 страниц».
+  if (units < 10 && Math.round(units) !== units) {
+    return `${units.toFixed(1).replace(".", ",")} страницы`;
+  }
+  const whole = Math.round(units);
+  return `${whole} ${plural(whole, "страница", "страницы", "страниц")}`;
 }
 
 /* ---------- принтеры ---------- */
@@ -640,9 +929,9 @@ async function loadPrinters() {
 
   if (!data.printers.length) {
     printerSelect.innerHTML = "<option value=''>принтеров нет</option>";
-    document.getElementById("printerHint").textContent =
-      data.note || "Ни одного принтера не найдено";
+    document.getElementById("printerHint").textContent = data.note || "Ни одного принтера не найдено";
     fillTrays(null);
+    updatePrintButton();
     return;
   }
 
@@ -665,6 +954,7 @@ function applyPrinter() {
     ? `дуплекс: ${caps.supports_duplex ? "да" : "нет"} · цвет: ${caps.supports_color ? "да" : "нет"}` +
       ` · копий драйвером: ${caps.max_copies} · ${caps.max_dpi || "?"} dpi`
     : "возможности принтера недоступны";
+  updatePrintButton();
 }
 
 function fillTrays(caps) {
@@ -679,75 +969,20 @@ function fillTrays(caps) {
   traySelect.disabled = !(caps && caps.trays.length);
 }
 
-/* ---------- события ---------- */
-
-function bindSegments() {
-  for (const group of document.querySelectorAll(".seg")) {
-    group.addEventListener("click", (event) => {
-      const button = event.target.closest("button");
-      if (!button) return;
-      for (const other of group.querySelectorAll("button")) {
-        other.setAttribute("aria-pressed", String(other === button));
-      }
-      if (group.id === "sideTabs") {
-        state.side = button.dataset.value;
-        refreshPreview();
-      } else {
-        scheduleUpdate();
-      }
-    });
-  }
+function updatePrintButton() {
+  const button = document.getElementById("printBtn");
+  button.disabled = !state.windows || !state.sessionId || state.blocked;
+  button.title = !state.windows ? "Печать доступна только в Windows"
+    : !state.sessionId ? "Сначала откройте документ"
+    : state.blocked ? "Задание превышает порог заполнения" : "Ctrl+P";
 }
 
-function bindControls() {
-  const ids = ["printer", "tray", "copies", "collate", "scale", "scalePercent", "paper", "pages", "autoRotate"];
-  for (const id of ids) {
-    const element = document.getElementById(id);
-    element.addEventListener("change", id === "printer" ? () => { applyPrinter(); scheduleUpdate(); } : scheduleUpdate);
-    if (element.type === "text" || element.type === "number") element.addEventListener("input", scheduleUpdate);
-  }
+/* ---------- печать ---------- */
 
-  document.getElementById("prevSheet").onclick = () => { state.sheet--; state.side = "front"; syncSide(); refreshPreview(); };
-  document.getElementById("nextSheet").onclick = () => { state.sheet++; state.side = "front"; syncSide(); refreshPreview(); };
-  document.addEventListener("keydown", (event) => {
-    if (event.target.matches("input, select, textarea")) return;
-    const total = state.describe ? state.describe.sheet_count : 0;
-    if (event.key === "ArrowLeft" && state.sheet > 1) { state.sheet--; state.side = "front"; syncSide(); refreshPreview(); }
-    if (event.key === "ArrowRight" && state.sheet < total) { state.sheet++; state.side = "front"; syncSide(); refreshPreview(); }
-  });
-
-  document.getElementById("printBtn").onclick = printJob;
-  document.getElementById("docChange").onclick = () => document.getElementById("filePicker").click();
-  document.getElementById("jobCancel").onclick = cancelJob;
-  document.getElementById("passwordOpen").onclick = submitPassword;
-  document.getElementById("password").addEventListener("keydown", (event) => {
-    if (event.key === "Enter") submitPassword();
-  });
-}
-
-function syncSide() {
-  for (const button of document.querySelectorAll("#sideTabs button")) {
-    button.setAttribute("aria-pressed", String(button.dataset.value === state.side));
-  }
-}
-
-function bindFileInput() {
-  const picker = document.getElementById("filePicker");
-  const zone = document.getElementById("dropZone");
-  zone.onclick = () => picker.click();
-  picker.onchange = () => { if (picker.files[0]) guard(uploadFile(picker.files[0])); picker.value = ""; };
-
-  for (const event of ["dragenter", "dragover"]) {
-    document.addEventListener(event, (e) => { e.preventDefault(); zone.classList.add("over"); });
-  }
-  for (const event of ["dragleave", "drop"]) {
-    document.addEventListener(event, (e) => { e.preventDefault(); zone.classList.remove("over"); });
-  }
-  document.addEventListener("drop", (event) => {
-    const file = event.dataTransfer.files[0];
-    if (file) guard(uploadFile(file));
-  });
-}
+const JOB_WORDS = {
+  queued: "В очереди", printing: "Печатается", printed: "Напечатано",
+  cancelled: "Отменено", error: "Ошибка", unknown: "Состояние неизвестно",
+};
 
 async function printJob() {
   const button = document.getElementById("printBtn");
@@ -761,25 +996,15 @@ async function printJob() {
       showJob(result.status || { state: "queued", total_pages: result.pages_sent });
       pollJob();
     } else {
-      const sheets = result.sheets;
-      banner(`Отправлено на «${result.printer}»: ${sheets} ${plural(sheets, "лист", "листа", "листов")}`, "ok");
+      banner(`Отправлено на «${result.printer}»: ${result.sheets} ${plural(result.sheets, "лист", "листа", "листов")}`, "ok");
     }
   } catch (error) {
     banner(error.message);
   } finally {
     button.textContent = "Печать";
-    button.disabled = !state.windows;
+    updatePrintButton();
   }
 }
-
-const JOB_WORDS = {
-  queued: "В очереди",
-  printing: "Печатается",
-  printed: "Напечатано",
-  cancelled: "Отменено",
-  error: "Ошибка",
-  unknown: "Состояние неизвестно",
-};
 
 function showJob(status) {
   const panel = document.getElementById("jobPanel");
@@ -810,13 +1035,9 @@ async function pollJob() {
   try {
     const status = await json(`/print-jobs/${state.jobId}`);
     showJob(status);
-    if (!status.is_final) {
-      state.jobTimer = setTimeout(pollJob, 1000);
-    } else if (status.state === "printed") {
-      banner("Задание напечатано", "ok");
-    } else if (status.problem) {
-      banner(status.problem);
-    }
+    if (!status.is_final) state.jobTimer = setTimeout(pollJob, 1000);
+    else if (status.state === "printed") banner("Задание напечатано", "ok");
+    else if (status.problem) banner(status.problem);
   } catch (error) {
     banner(error.message);
   }
@@ -833,17 +1054,112 @@ async function cancelJob() {
   }
 }
 
-const guard = (promise) => promise.catch((error) => banner(error.message));
+/* ---------- события ---------- */
+
+function syncSide() {
+  for (const button of document.querySelectorAll("#sideTabs button")) {
+    button.setAttribute("aria-pressed", String(button.dataset.value === state.side));
+  }
+}
+
+function bindSegments() {
+  for (const group of document.querySelectorAll(".seg")) {
+    group.addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (!button) return;
+      for (const other of group.querySelectorAll("button")) {
+        other.setAttribute("aria-pressed", String(other === button));
+      }
+      if (group.id === "sideTabs") {
+        state.side = button.dataset.value;
+        guard(refreshPreview());
+      } else {
+        scheduleUpdate();
+      }
+    });
+  }
+}
+
+function bindControls() {
+  const ids = ["printer", "tray", "copies", "collate", "scale", "scalePercent", "paper", "pages", "autoRotate"];
+  for (const id of ids) {
+    const element = document.getElementById(id);
+    element.addEventListener("change", id === "printer" ? () => { applyPrinter(); scheduleUpdate(); } : scheduleUpdate);
+    if (element.type === "text" || element.type === "number") element.addEventListener("input", scheduleUpdate);
+  }
+
+  document.getElementById("prevSheet").onclick = () => goToSheet(state.sheet - 1);
+  document.getElementById("nextSheet").onclick = () => goToSheet(state.sheet + 1);
+  document.getElementById("zoomIn").onclick = () => stepZoom(1);
+  document.getElementById("zoomOut").onclick = () => stepZoom(-1);
+  document.getElementById("zoomFit").onclick = () => setZoom(null);
+  document.getElementById("printBtn").onclick = printJob;
+  document.getElementById("jobCancel").onclick = cancelJob;
+  document.getElementById("docChange").onclick = () => document.getElementById("filePicker").click();
+  document.getElementById("passwordOpen").onclick = submitPassword;
+  document.getElementById("password").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") submitPassword();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.ctrlKey && event.key.toLowerCase() === "p") {
+      event.preventDefault();
+      if (!document.getElementById("printBtn").disabled) printJob();
+      return;
+    }
+    if (event.target.matches("input, select, textarea")) return;
+    const actions = {
+      ArrowLeft: () => goToSheet(state.sheet - 1),
+      ArrowRight: () => goToSheet(state.sheet + 1),
+      "+": () => stepZoom(1), "=": () => stepZoom(1),
+      "-": () => stepZoom(-1), _: () => stepZoom(-1),
+      "0": () => setZoom(null),
+    };
+    const action = actions[event.key];
+    if (action) { event.preventDefault(); action(); }
+  });
+}
+
+function bindFileInput() {
+  const picker = document.getElementById("filePicker");
+  const zone = document.getElementById("dropZone");
+  zone.onclick = () => picker.click();
+  picker.onchange = () => { if (picker.files[0]) guard(uploadFile(picker.files[0])); picker.value = ""; };
+
+  let depth = 0;
+  document.addEventListener("dragenter", (event) => {
+    event.preventDefault();
+    depth++;
+    document.body.classList.add("dragging");
+  });
+  document.addEventListener("dragover", (event) => event.preventDefault());
+  document.addEventListener("dragleave", (event) => {
+    event.preventDefault();
+    if (--depth <= 0) { depth = 0; document.body.classList.remove("dragging"); }
+  });
+  document.addEventListener("drop", (event) => {
+    event.preventDefault();
+    depth = 0;
+    document.body.classList.remove("dragging");
+    const file = event.dataTransfer.files[0];
+    if (file) guard(uploadFile(file));
+  });
+}
 
 let resizeTimer = null;
 window.addEventListener("resize", () => {
+  if (state.zoom !== null) return;   // при явном масштабе окно ни при чём
+  applyFitSize();                    // сразу, чтобы лист не вылезал за край
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(refreshPreview, 250);
+  resizeTimer = setTimeout(() => guard(refreshPreview()), 250);   // потом — резче
 });
 
 bindSegments();
 bindControls();
 bindFileInput();
+enablePanning();
+setZoom(null);
+updatePrintButton();
 guard(loadPrinters());
 </script>
 </body>

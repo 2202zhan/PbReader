@@ -105,6 +105,28 @@ class TestClipWarning:
             preview = render(document, PrintJob(scale=ScaleMode.ACTUAL), device)
         assert preview.ink_clipped
 
+    @pytest.mark.parametrize("width", [120, 200, 400, 900, 1600])
+    def test_the_verdict_does_not_depend_on_the_preview_size(self, a4_portrait_pdf, device, width):
+        """Один и тот же документ не может «терять текст» в миниатюре и не
+        терять в полном виде.
+
+        При уменьшении картинки сглаживание размазывает содержимое на пиксель
+        за границу области печати, и проверка по одному тёмному пикселю
+        объявляла потерю там, где её нет: в ленте листов все миниатюры
+        краснели, хотя терять было нечего.
+        """
+        with PdfDocument(a4_portrait_pdf) as document:
+            preview = render(document, PrintJob(scale=ScaleMode.ACTUAL), device, width=width)
+        assert preview.ink_clipped is False
+
+    @pytest.mark.parametrize("width", [120, 400, 1600])
+    def test_real_loss_is_seen_at_every_size_too(self, make_pdf, device, width):
+        big = A4.size.width * 1.25
+        path = make_pdf([(big, A4.size.height * 1.25, 0)])
+        with PdfDocument(path) as document:
+            preview = render(document, PrintJob(scale=ScaleMode.ACTUAL), device, width=width)
+        assert preview.ink_clipped is True
+
     def test_estimated_margins_are_disclosed(self, a4_portrait_pdf, device):
         with PdfDocument(a4_portrait_pdf) as document:
             preview = render(document, PrintJob(), device)
