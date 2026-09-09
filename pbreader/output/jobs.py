@@ -13,14 +13,6 @@
 исчезновение задания, которое мы САМИ отправили, считается «напечатано, но не
 подтверждено» (`confirmed=False`), а не «напечатано». Врать в эту сторону
 нельзя: именно на этом отчёте аппарат решает, брать ли деньги.
-
-Убрать это «не подтверждено» умеет только сам аппарат. У сетевого принтера
-есть счётчик механизма — сколько листов он отпечатал за свою жизнь. Прочитанный
-до задания и после, он даёт ФИЗИЧЕСКОЕ число вышедших листов; ничего подобного
-в Windows нет, а `PagesPrinted` у спулера считает страницы, отданные драйверу.
-Оговорка: счётчик общий на аппарат, поэтому чужая печать в тот же момент попадёт
-в разницу. Для киоска со своим принтером это не беда, для общего — повод не
-доверять числу вслепую.
 """
 
 from __future__ import annotations
@@ -97,18 +89,6 @@ class JobState(str, Enum):
 
 
 @dataclass
-class CounterBaseline:
-    """Показания счётчика механизма на момент отправки задания."""
-
-    host: str
-    community: str
-    before: int
-    expected_sheets: int
-    deadline: float
-    timeout: float = 2.0
-
-
-@dataclass
 class JobStatus:
     job_id: int
     printer: str
@@ -122,10 +102,6 @@ class JobStatus:
     problem: str = ""
     document: str = ""
     submitted_at: str = ""
-    #: Листов отпечатано механизмом — по счётчику самого аппарата. None, если
-    #: спросить некого (принтер не в сети либо SNMP закрыт).
-    sheets_marked: int | None = None
-    expected_sheets: int = 0
 
     @property
     def is_final(self) -> bool:
@@ -143,8 +119,6 @@ class JobStatus:
             "problem": self.problem,
             "document": self.document,
             "submitted_at": self.submitted_at,
-            "sheets_marked": self.sheets_marked,
-            "expected_sheets": self.expected_sheets,
             "is_final": self.is_final,
         }
 
@@ -247,28 +221,13 @@ class JobTracker:
     отсутствие записи в очереди.
     """
 
-    #: Сколько ждать, пока счётчик механизма догонит очередь. Задание уходит из
-    #: очереди раньше, чем последний лист выезжает в приёмник.
-    CONFIRM_WINDOW_SECONDS = 120.0
-
     def __init__(self, keep_finished: int = 64) -> None:
         self.keep_finished = keep_finished
         self._records: dict[int, JobStatus] = {}
-        self._baselines: dict[int, CounterBaseline] = {}
         self._order: list[int] = []
         self._lock = RLock()
 
-    def register(
-        self,
-        job_id: int,
-        printer: str,
-        total_pages: int,
-        document: str = "",
-        snmp_host: str | None = None,
-        community: str = "public",
-        expected_sheets: int = 0,
-        snmp_timeout: float = 2.0,
-    ) -> JobStatus:
+    def register(self, job_id: int, printer: str, total_pages: int, document: str = "") -> JobStatus:
         status = JobStatus(
             job_id=job_id,
             printer=printer,
@@ -276,70 +235,13 @@ class JobTracker:
             total_pages=total_pages,
             document=document,
             submitted_at=datetime.now().isoformat(timespec="seconds"),
-            expected_sheets=expected_sheets or total_pages,
         )
-
-        baseline = None
-        if snmp_host:
-            from ..printers.telemetry import page_count
-
-            before = page_count(snmp_host, community=community, timeout=snmp_timeout)
-            if before is not None:
-                baseline = CounterBaseline(
-                    host=snmp_host, community=community, before=before,
-                    expected_sheets=status.expected_sheets,
-                    deadline=time.monotonic() + self.CONFIRM_WINDOW_SECONDS,
-                    timeout=snmp_timeout,
-                )
-                logger.info(
-                    "Задание %d: счётчик механизма до печати — %d листов", job_id, before
-                )
-
         with self._lock:
             self._records[job_id] = status
-            if baseline:
-                self._baselines[job_id] = baseline
             self._order.append(job_id)
             while len(self._order) > self.keep_finished:
-                dropped = self._order.pop(0)
-                self._records.pop(dropped, None)
-                self._baselines.pop(dropped, None)
+                self._records.pop(self._order.pop(0), None)
         return status
-
-    def _confirm_by_counter(self, status: JobStatus) -> None:
-        """Сверяет отпечатанное со счётчиком самого аппарата.
-
-        Счётчик догоняет очередь не сразу: задание считается ушедшим, когда
-        спулер отдал последнюю страницу драйверу, а лист в этот момент ещё
-        едет. Поэтому пробуем повторно, пока не сойдётся или не выйдет срок.
-        """
-        with self._lock:
-            baseline = self._baselines.get(status.job_id)
-        if baseline is None or status.sheets_marked is not None:
-            return
-
-        from ..printers.telemetry import page_count
-
-        after = page_count(baseline.host, community=baseline.community, timeout=baseline.timeout)
-        if after is None:
-            return
-
-        marked = after - baseline.before
-        if marked >= baseline.expected_sheets > 0:
-            status.sheets_marked = marked
-            status.confirmed = True
-            logger.info(
-                "Задание %d подтверждено аппаратом: отпечатано %d листов (ожидалось %d)",
-                status.job_id, marked, baseline.expected_sheets,
-            )
-        elif time.monotonic() > baseline.deadline:
-            status.sheets_marked = max(0, marked)
-            status.confirmed = False
-            logger.warning(
-                "Задание %d: счётчик аппарата вырос на %d при ожидаемых %d — "
-                "часть листов не вышла",
-                status.job_id, marked, baseline.expected_sheets,
-            )
 
     def status(self, job_id: int) -> JobStatus:
         with self._lock:
@@ -350,10 +252,7 @@ class JobTracker:
 
         # Задание, уже дошедшее до конца, повторно у спулера не спрашиваем: его
         # записи там давно нет, и ответ был бы «не найдено» на каждый опрос.
-        # А вот счётчик механизма ещё может догонять — его дочитываем.
         if known.is_final:
-            if known.state is JobState.PRINTED:
-                self._confirm_by_counter(known)
             return known
 
         try:
@@ -372,11 +271,9 @@ class JobTracker:
             if not known.pages_printed:
                 known.pages_printed = known.total_pages
             logger.info(
-                "Задание %d исчезло из очереди %s — считаем напечатанным",
+                "Задание %d исчезло из очереди %s — считаем напечатанным (без подтверждения)",
                 job_id, known.printer,
             )
-            # Спулер сказать больше нечего — спрашиваем сам аппарат.
-            self._confirm_by_counter(known)
         else:
             live.total_pages = live.total_pages or known.total_pages
             live.document = live.document or known.document
@@ -384,8 +281,6 @@ class JobTracker:
             known = live
             with self._lock:
                 self._records[job_id] = known
-            if known.state is JobState.PRINTED:
-                self._confirm_by_counter(known)
         return known
 
     def cancel(self, job_id: int) -> bool:

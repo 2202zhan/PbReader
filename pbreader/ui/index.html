@@ -165,22 +165,6 @@
   .lock-row input { flex: 1; }
   .lock-error { margin-top: 7px; font-size: 12px; color: var(--danger); }
 
-  .device {
-    margin: -4px 0 10px; padding: 9px 11px; border-radius: 8px;
-    background: var(--panel-2); border: 1px solid var(--line); font-size: 12px;
-  }
-  .device-row { display: flex; gap: 8px; color: var(--ink-soft); }
-  .device-row b { margin-left: auto; color: var(--ink); font-weight: 550; white-space: nowrap; }
-  .device-levels { margin-top: 6px; display: grid; gap: 4px; }
-  .level { display: flex; align-items: center; gap: 7px; color: var(--ink-faint); }
-  .level-bar { flex: 1; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
-  .level-bar i { display: block; height: 100%; background: var(--ok); }
-  .level.low .level-bar i { background: var(--warn-ink); }
-  .level.empty .level-bar i { background: var(--danger); }
-  .level-value { min-width: 34px; text-align: right; }
-  .device-problem { margin-top: 7px; color: var(--danger); }
-  .device.bad { background: var(--danger-bg); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
-
   .toner {
     margin-top: 16px; padding: 11px 12px; border-radius: var(--radius);
     background: var(--panel-2); border: 1px solid var(--line);
@@ -261,11 +245,6 @@
     <div class="row wide"><select id="printer"></select></div>
     <div class="row"><label for="tray">Лоток</label><select id="tray"></select></div>
     <div class="hint" id="printerHint"></div>
-    <div id="devicePanel" class="device" hidden>
-      <div class="device-row"><span id="deviceModel"></span><b id="devicePages"></b></div>
-      <div class="device-levels" id="deviceLevels"></div>
-      <div class="device-problem" id="deviceProblem" hidden></div>
-    </div>
 
     <h2>Параметры</h2>
     <div class="row"><label for="copies">Копии</label><input type="number" id="copies" min="1" max="999" value="1"></div>
@@ -686,53 +665,6 @@ function applyPrinter() {
     ? `дуплекс: ${caps.supports_duplex ? "да" : "нет"} · цвет: ${caps.supports_color ? "да" : "нет"}` +
       ` · копий драйвером: ${caps.max_copies} · ${caps.max_dpi || "?"} dpi`
     : "возможности принтера недоступны";
-  guard(refreshDevice());
-}
-
-/** Что знает только сам аппарат: счётчик листов, бумага в лотках, тонер. */
-async function refreshDevice() {
-  const panel = document.getElementById("devicePanel");
-  const printer = value("printer");
-  if (!printer) { panel.hidden = true; return; }
-
-  let info;
-  try {
-    info = await json(`/telemetry?printer=${encodeURIComponent(printer)}`);
-  } catch (_) {
-    panel.hidden = true;
-    return;
-  }
-  if (!info.reachable) { panel.hidden = true; return; }
-
-  panel.hidden = false;
-  panel.className = "device" + (info.blocking && info.blocking.length ? " bad" : "");
-  document.getElementById("deviceModel").textContent = info.model || "аппарат в сети";
-  document.getElementById("devicePages").textContent =
-    info.page_count === null ? "" : `${info.page_count.toLocaleString("ru")} листов за всю жизнь`;
-
-  const levels = document.getElementById("deviceLevels");
-  levels.innerHTML = "";
-  for (const item of [...(info.trays || []), ...(info.supplies || [])]) {
-    if (item.percent === null && !item.level_known) continue;
-    const percent = item.percent === null ? 100 : item.percent;
-    const row = document.createElement("div");
-    row.className = "level" + (item.is_empty ? " empty" : percent <= 10 ? " low" : "");
-    row.innerHTML = `<span>${escapeText(item.name)}</span>
-      <span class="level-bar"><i style="width:${Math.max(2, percent)}%"></i></span>
-      <span class="level-value"></span>`;
-    row.lastElementChild.textContent = item.percent === null ? "—" : `${Math.round(item.percent)} %`;
-    levels.appendChild(row);
-  }
-
-  const problem = document.getElementById("deviceProblem");
-  problem.hidden = !(info.problems && info.problems.length);
-  problem.textContent = (info.problems || []).join(", ");
-}
-
-function escapeText(value) {
-  const holder = document.createElement("span");
-  holder.textContent = value;
-  return holder.innerHTML;
 }
 
 function fillTrays(caps) {
@@ -866,14 +798,9 @@ function showJob(status) {
   const parts = [];
   if (status.problem) parts.push(status.problem);
   if (!final && status.total_pages) parts.push(`${status.pages_printed || 0} из ${status.total_pages} стр.`);
-  if (status.state === "printed") {
-    if (status.sheets_marked !== null && status.sheets_marked !== undefined) {
-      // Счётчик самого аппарата: сколько листов механизм действительно отпечатал.
-      parts.push(`аппарат отпечатал ${status.sheets_marked} ${plural(status.sheets_marked, "лист", "листа", "листов")}`);
-    } else if (status.confirmed === false) {
-      parts.push("подтверждения от аппарата не было");
-    }
-  }
+  // «Не подтверждено» — задание исчезло из очереди, и финала мы не видели.
+  // Показываем честно: по этому отчёту аппарат решает, брать ли деньги.
+  if (status.state === "printed" && status.confirmed === false) parts.push("подтверждения от спулера не было");
   document.getElementById("jobSub").textContent = parts.join(" · ");
 }
 

@@ -210,49 +210,7 @@ def cmd_printers(args: argparse.Namespace, config: Config) -> int:
                 print(f"    {tray['id']:>5}  {tray['name']}")
         else:
             print("  лотки: драйвер список не отдал")
-
-        if not args.no_snmp:
-            _print_telemetry(entry["name"], config)
     return 0
-
-
-def _print_telemetry(printer: str, config: Config) -> None:
-    """Показывает то, что знает только сам аппарат: счётчик, бумагу, тонер."""
-    from .printers import read_telemetry, resolve_snmp
-
-    target = resolve_snmp(printer, host=config.snmp_host, community=config.snmp_community,
-                          enabled=config.snmp_enabled)
-    if not target.available:
-        # Причину печатаем всегда: «телеметрии нет» без объяснения — это то,
-        # из-за чего её однажды никто и не заметил.
-        print(f"  по сети: НЕТ — {target.reason}")
-        return
-
-    address = target.host
-    info = read_telemetry(printer, community=config.snmp_community,
-                          host=config.snmp_host, timeout=config.snmp_timeout,
-                          enabled=config.snmp_enabled)
-    if not info.reachable:
-        print(f"  по сети ({address}, community {target.community!r}): не отвечает — {info.error}")
-        print("     проверьте, что SNMP включён в веб-интерфейсе аппарата и community совпадает")
-        return
-
-    print(f"  по сети ({address}): {info.model or 'аппарат'}"
-          + (f", s/n {info.serial}" if info.serial else ""))
-    if info.page_count is not None:
-        print(f"    отпечатано за всю жизнь: {info.page_count} листов")
-    if info.printer_status:
-        print(f"    состояние: {info.printer_status}")
-    for tray in info.trays:
-        level = f"{tray.percent:.0f} %" if tray.percent is not None else (
-            "уровень неизвестен" if not tray.level_known else f"{tray.level}"
-        )
-        print(f"    бумага, {tray.name}: {level}" + ("  ПУСТО" if tray.is_empty else ""))
-    for supply in info.supplies:
-        level = f"{supply.percent:.0f} %" if supply.percent is not None else "уровень неизвестен"
-        print(f"    расходник, {supply.name}: {level}")
-    if info.problems:
-        print(f"    неполадки: {', '.join(info.problems)}")
 
 
 def cmd_diagnose(args: argparse.Namespace, config: Config) -> int:
@@ -264,9 +222,6 @@ def cmd_diagnose(args: argparse.Namespace, config: Config) -> int:
     if not printer:
         print("Принтер не задан, и принтера по умолчанию в системе нет")
         return 2
-
-    if getattr(args, "snmp_host", None):
-        config.snmp_host = args.snmp_host
 
     report = diagnose(printer)
     if args.json:
@@ -286,8 +241,6 @@ def cmd_diagnose(args: argparse.Namespace, config: Config) -> int:
             print(f"    {name:20} {'да' if available else 'НЕТ'}")
         if not (raster["StretchDIBits"] or raster["SetDIBitsToDevice"]):
             print("\n  Драйвер не заявляет ни одного способа вывести растр — печать выйдет пустой.")
-
-    _print_telemetry(printer, config)
 
     if args.test_page:
         print("\nОтправляю пробную страницу (рамка, диагонали, серые полосы)…")
@@ -408,16 +361,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     printers = subparsers.add_parser("printers", help="принтеры, лотки и возможности")
     printers.add_argument("--json", action="store_true")
-    printers.add_argument("--no-snmp", action="store_true", dest="no_snmp",
-                          help="не опрашивать аппараты по сети")
     printers.set_defaults(handler=cmd_printers)
 
     checkup = subparsers.add_parser(
         "diagnose", help="почему на бумаге пусто: возможности драйвера и пробная страница"
     )
     checkup.add_argument("--printer", help="имя принтера (по умолчанию — системный)")
-    checkup.add_argument("--snmp-host", dest="snmp_host",
-                         help="проверить телеметрию по этому адресу, минуя определение по порту")
     checkup.add_argument("--test-page", action="store_true", dest="test_page",
                          help="напечатать пробную страницу мимо PDF")
     checkup.add_argument("--json", action="store_true")
