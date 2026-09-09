@@ -96,6 +96,70 @@ def _capability(name: str, port: str, index: int, default=None):
         return default
 
 
+def _safely(what: str, name: str, parse, default):
+    """Разбирает один ответ драйвера, не давая ему сорвать остальные.
+
+    Возможности принтера — сведения СПРАВОЧНЫЕ, а спрашиваются они на пути к
+    печати. Одно непонятое поле не имеет права остановить задание: печать
+    переживёт неизвестный список разрешений, а человек у аппарата — нет.
+    """
+    try:
+        return parse()
+    except Exception as exc:
+        logger.warning("Принтер %r: не разобрал %s (%s) — пропускаем", name, what, exc)
+        return default
+
+
+def _parse_resolutions(raw) -> list[tuple[int, int]]:
+    """Разбирает ответ DC_ENUMRESOLUTIONS.
+
+    pywin32 отдаёт список СЛОВАРЕЙ вида {'xdpi': 600, 'ydpi': 600}, а не пар
+    чисел, как можно подумать по документации Win32. Распаковка такого словаря
+    в пару даёт его КЛЮЧИ — отсюда и падало int('xdpi'). Принимаем все три
+    формы, чтобы не зависеть от версии обвязки.
+    """
+    if not raw:
+        return []
+
+    resolutions: list[tuple[int, int]] = []
+    for item in raw:
+        if isinstance(item, dict):
+            x, y = item.get("xdpi"), item.get("ydpi")
+            if x is None or y is None:
+                values = [v for v in item.values() if isinstance(v, (int, float))]
+                if len(values) < 2:
+                    continue
+                x, y = values[0], values[1]
+            resolutions.append((int(x), int(y)))
+        elif isinstance(item, (tuple, list)) and len(item) >= 2:
+            resolutions.append((int(item[0]), int(item[1])))
+        elif isinstance(item, (int, float)):
+            # Плоский список: пары идут подряд, как в самом Win32.
+            resolutions.append((int(item), int(item)))
+    return resolutions
+
+
+def _parse_trays(bins, bin_names, name: str) -> list[Tray]:
+    """Собирает лотки из двух параллельных списков драйвера.
+
+    Если списки разной длины — доверяем идентификаторам и подписываем
+    безымянные лотки номером: лоток без названия печатать не мешает, а лоток,
+    потерянный из-за рассинхронизации, мешает.
+    """
+    trays: list[Tray] = []
+    for index, bin_id in enumerate(bins or ()):
+        try:
+            identifier = int(bin_id)
+        except (TypeError, ValueError):
+            logger.warning("Принтер %r: нечисловой идентификатор лотка %r — пропускаем", name, bin_id)
+            continue
+        title = ""
+        if bin_names and index < len(bin_names):
+            title = str(bin_names[index]).strip()
+        trays.append(Tray(id=identifier, name=title or f"Лоток {identifier}"))
+    return trays
+
+
 def describe(name: str) -> PrinterCapabilities:
     """Спрашивает у драйвера, что принтер умеет."""
     info = next((p for p in list_printers() if p.name == name), None)
@@ -106,17 +170,28 @@ def describe(name: str) -> PrinterCapabilities:
         raise PrinterUnavailable(f"Принтер {name!r} не найден. Доступны: {known}")
 
     port = info.port
-    bins = _capability(name, port, DC_BINS, default=()) or ()
-    bin_names = _capability(name, port, DC_BINNAMES, default=()) or ()
-    # Списки идут параллельно; если драйвер вернул их разной длины — доверяем
-    # идентификаторам и подписываем безымянные лотки номером.
-    trays = [
-        Tray(id=int(bin_id), name=(bin_names[i].strip() if i < len(bin_names) else f"Лоток {bin_id}"))
-        for i, bin_id in enumerate(bins)
-    ]
 
-    resolutions_raw = _capability(name, port, DC_ENUMRESOLUTIONS, default=()) or ()
-    resolutions = [(int(x), int(y)) for x, y in resolutions_raw] if resolutions_raw else []
+    # Каждый ответ драйвера разбирается отдельно: непонятое поле теряется само,
+    # а не уносит с собой остальные и не срывает печать.
+    trays = _safely(
+        "список лотков", name,
+        lambda: _parse_trays(
+            _capability(name, port, DC_BINS, default=()) or (),
+            _capability(name, port, DC_BINNAMES, default=()) or (),
+            name,
+        ),
+        [],
+    )
+    resolutions = _safely(
+        "список разрешений", name,
+        lambda: _parse_resolutions(_capability(name, port, DC_ENUMRESOLUTIONS, default=())),
+        [],
+    )
+    max_copies = _safely(
+        "число копий", name,
+        lambda: max(1, int(_capability(name, port, DC_COPIES, default=1) or 1)),
+        1,
+    )
 
     return PrinterCapabilities(
         name=name,
@@ -124,7 +199,7 @@ def describe(name: str) -> PrinterCapabilities:
         supports_duplex=bool(_capability(name, port, DC_DUPLEX, default=0)),
         supports_color=bool(_capability(name, port, DC_COLORDEVICE, default=0)),
         supports_collate=bool(_capability(name, port, DC_COLLATE, default=0)),
-        max_copies=max(1, int(_capability(name, port, DC_COPIES, default=1) or 1)),
+        max_copies=max_copies,
         resolutions=resolutions,
         driver=info.driver,
         port=port,
