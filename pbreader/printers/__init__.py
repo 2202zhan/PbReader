@@ -52,29 +52,107 @@ def list_trays(name: str) -> list[Tray]:
     return describe(name).trays
 
 
-def resolve_snmp_host(name: str, configured: str = "") -> str | None:
-    """Адрес принтера для опроса по сети: из настроек либо по его порту."""
-    if configured:
-        return configured
-    from .network import resolve_host
+import logging as _logging
+
+_logger = _logging.getLogger(__name__)
+#: О чём уже сказали в журнал — чтобы не повторять на каждый запрос интерфейса.
+_announced: set[tuple] = set()
+
+
+@dataclass(frozen=True)
+class SnmpTarget:
+    """Куда идти за телеметрией и почему, если идти некуда."""
+
+    host: str | None = None
+    community: str = "public"
+    port: str = ""
+    #: Причина, по которой опрос невозможен. Пусто — всё в порядке.
+    reason: str = ""
+
+    @property
+    def available(self) -> bool:
+        return bool(self.host)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"host": self.host, "community": self.community, "port": self.port, "reason": self.reason}
+
+
+def resolve_snmp(
+    name: str,
+    host: str = "",
+    community: str = "",
+    enabled: bool = True,
+) -> SnmpTarget:
+    """Определяет, у кого спрашивать телеметрию, и ГОВОРИТ ОБ ЭТОМ ВСЛУХ.
+
+    Молчаливый пропуск опроса — то, из-за чего телеметрия однажды просто не
+    заработала, и понять это по журналу было нельзя. Поэтому решение
+    записывается в журнал: адрес найден, опрос выключен или адреса нет и почему.
+    Повторно об одном и том же не пишем — интерфейс спрашивает часто.
+    """
+    if not enabled:
+        return SnmpTarget(reason="опрос по сети выключен в настройках (snmp_enabled)")
+
+    if host:
+        target = SnmpTarget(host=host, community=community or "public", reason="")
+        _announce(("configured", name, host), "Принтер %r: телеметрия с %s (адрес из настроек)", name, host)
+        return target
 
     try:
-        return resolve_host(name)
+        from .network import resolve_port
+
+        found = resolve_port(name)
     except Exception as exc:  # реестр может быть недоступен
-        import logging
+        return SnmpTarget(reason=f"настройки порта не прочитаны: {exc}")
 
-        logging.getLogger(__name__).debug("Адрес принтера %r не определён: %s", name, exc)
-        return None
+    # Community из настроек важнее того, что прописано в порте Windows: его
+    # задали осознанно.
+    chosen_community = community or found.community or "public"
+
+    if found.host:
+        _announce(
+            ("resolved", name, found.host),
+            "Принтер %r: телеметрия с %s (порт %s, community %r)",
+            name, found.host, found.port or "?", chosen_community,
+        )
+        return SnmpTarget(host=found.host, community=chosen_community, port=found.port)
+
+    _announce(
+        ("missing", name, found.reason),
+        "Принтер %r: телеметрия недоступна — %s", name, found.reason,
+    )
+    return SnmpTarget(community=chosen_community, port=found.port, reason=found.reason)
 
 
-def read_telemetry(name: str, community: str = "public", host: str = "", timeout: float = 2.0) -> Telemetry:
+def _announce(key: tuple, message: str, *args: Any) -> None:
+    if key in _announced:
+        _logger.debug(message, *args)
+        return
+    _announced.add(key)
+    _logger.info(message, *args)
+
+
+def forget_announced() -> None:
+    """Сбрасывает память о сказанном — нужно тестам и смене настроек."""
+    _announced.clear()
+
+
+def resolve_snmp_host(name: str, configured: str = "") -> str | None:
+    """Короткий ответ: адрес принтера для SNMP либо None."""
+    return resolve_snmp(name, host=configured).host
+
+
+def read_telemetry(
+    name: str, community: str = "public", host: str = "", timeout: float = 2.0,
+    enabled: bool = True,
+) -> Telemetry:
     """Снимок состояния аппарата по сети. Никогда не поднимает исключений."""
     from . import telemetry as telemetry_module
 
-    address = resolve_snmp_host(name, host)
-    if not address:
-        return Telemetry(host="", error="Принтер подключён не по сети — опросить его нечем")
-    return telemetry_module.read(address, community=community, timeout=timeout)
+    target = resolve_snmp(name, host=host, community=community, enabled=enabled)
+    if not target.available:
+        return Telemetry(host="", error=target.reason)
+    return telemetry_module.read(target.host, community=target.community, timeout=timeout)
 
 
 @dataclass
@@ -151,8 +229,11 @@ __all__ = [
     "LOW_SUPPLY_PERCENT",
     "Preflight",
     "Telemetry",
+    "SnmpTarget",
+    "forget_announced",
     "preflight",
     "read_telemetry",
+    "resolve_snmp",
     "resolve_snmp_host",
     "PrinterCapabilities",
     "PrinterInfo",

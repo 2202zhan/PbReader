@@ -5,9 +5,14 @@
 SNMP спрятан в настройках порта, и спрашивать его руками — лишний повод
 ошибиться и получить телеметрию не от того аппарата.
 
-Порядок поиска: сначала настройки порта в реестре (там адрес лежит в явном
-виде), затем само имя порта — «Стандартный порт TCP/IP» его обычно называет
-`IP_192.168.1.50`, а часть драйверов просто адресом.
+Ищем во всех мониторах портов, какие есть в системе, а не в заранее известном
+списке: у HP, Canon и WSD свои мониторы, и перечислить их наперёд нельзя.
+Заодно оттуда же берётся community, которое Windows уже настроила для этого
+порта, — обычно оно совпадает с тем, что задано в самом аппарате.
+
+Если адрес определить не удалось, наружу уходит ПРИЧИНА, а не просто «нет».
+Молчаливый пропуск — это ровно то, из-за чего телеметрия однажды не заработала,
+и понять это по журналу было невозможно.
 """
 
 from __future__ import annotations
@@ -15,21 +20,38 @@ from __future__ import annotations
 import ipaddress
 import logging
 import re
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-_PORT_KEYS = (
-    r"SYSTEM\CurrentControlSet\Control\Print\Monitors\Standard TCP/IP Port\Ports",
-    r"SYSTEM\CurrentControlSet\Control\Print\Monitors\HP Standard TCP/IP Port\Ports",
-    r"SYSTEM\CurrentControlSet\Control\Print\Monitors\WSD Port\Ports",
-)
+MONITORS_KEY = r"SYSTEM\CurrentControlSet\Control\Print\Monitors"
 
 #: Имя порта вида «IP_192.168.1.50» или «192.168.1.50_1».
 _ADDRESS_IN_NAME = re.compile(r"(\d{1,3}(?:\.\d{1,3}){3})")
 
+#: Порты локального подключения — сетевого адреса у них нет по определению.
+_LOCAL_PREFIXES = ("USB", "LPT", "COM", "FILE", "NUL", "PORTPROMPT", "XPSPORT", "SHRFAX")
+
+
+@dataclass(frozen=True)
+class PortAddress:
+    """Что удалось узнать о порте принтера."""
+
+    port: str = ""
+    host: str | None = None
+    #: Community, настроенное для этого порта в Windows.
+    community: str | None = None
+    monitor: str = ""
+    #: Почему адреса нет — человеческим языком.
+    reason: str = ""
+
+    @property
+    def is_local(self) -> bool:
+        return bool(self.port) and self.port.upper().startswith(_LOCAL_PREFIXES)
+
 
 def _looks_like_address(value: str) -> bool:
-    value = value.strip()
+    value = (value or "").strip()
     if not value:
         return False
     try:
@@ -40,57 +62,116 @@ def _looks_like_address(value: str) -> bool:
         return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.\-]{1,253}", value)) and "." in value
 
 
-def _from_registry(port: str) -> str | None:
+def _read_port_key(hive, path: str) -> dict[str, object]:
     import winreg
 
-    for base in _PORT_KEYS:
-        try:
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, f"{base}\\{port}") as key:
-                for value_name in ("HostName", "IPAddress"):
-                    try:
-                        value, _ = winreg.QueryValueEx(key, value_name)
-                    except OSError:
-                        continue
-                    if value and _looks_like_address(str(value)):
-                        return str(value).strip()
-        except OSError:
-            continue
-    return None
+    values: dict[str, object] = {}
+    try:
+        with winreg.OpenKey(hive, path) as key:
+            count = winreg.QueryInfoKey(key)[1]
+            for index in range(count):
+                try:
+                    name, value, _ = winreg.EnumValue(key, index)
+                except OSError:
+                    continue
+                values[name] = value
+    except OSError:
+        return {}
+    return values
 
 
-def _from_port_name(port: str) -> str | None:
-    match = _ADDRESS_IN_NAME.search(port or "")
-    if match and _looks_like_address(match.group(1)):
-        return match.group(1)
-    # Порт мог быть назван именем узла целиком.
-    candidate = (port or "").strip()
-    return candidate if _looks_like_address(candidate) else None
+def _search_monitors(port: str) -> tuple[dict[str, object], str]:
+    """Ищет настройки порта во всех мониторах печати."""
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, MONITORS_KEY) as monitors:
+            names = []
+            for index in range(winreg.QueryInfoKey(monitors)[0]):
+                try:
+                    names.append(winreg.EnumKey(monitors, index))
+                except OSError:
+                    break
+    except OSError as exc:
+        logger.debug("Список мониторов печати недоступен: %s", exc)
+        return {}, ""
+
+    for monitor in names:
+        values = _read_port_key(
+            winreg.HKEY_LOCAL_MACHINE, f"{MONITORS_KEY}\\{monitor}\\Ports\\{port}"
+        )
+        if values:
+            return values, monitor
+    return {}, ""
+
+
+def describe_port(printer_name: str, port: str) -> PortAddress:
+    """Разбирает порт принтера: адрес, community и причину, если адреса нет."""
+    from . import IS_WINDOWS
+
+    port = (port or "").strip()
+    if not port:
+        return PortAddress(reason="у принтера не указан порт")
+
+    result = PortAddress(port=port)
+    if result.is_local:
+        return PortAddress(port=port, reason="принтер подключён кабелем — по сети его не опросить")
+
+    values, monitor = _search_monitors(port) if IS_WINDOWS else ({}, "")
+
+    host = None
+    for key in ("HostName", "IPAddress"):
+        candidate = str(values.get(key, "") or "").strip()
+        if _looks_like_address(candidate):
+            host = candidate
+            break
+
+    community = None
+    raw_community = str(values.get("SNMP Community", "") or "").strip()
+    if raw_community:
+        community = raw_community
+
+    if host is None:
+        # Порт часто назван самим адресом: «IP_192.168.1.50» или «192.168.1.50».
+        match = _ADDRESS_IN_NAME.search(port)
+        if match and _looks_like_address(match.group(1)):
+            host = match.group(1)
+        elif _looks_like_address(port):
+            host = port
+
+    if host:
+        return PortAddress(port=port, host=host, community=community, monitor=monitor)
+
+    if port.upper().startswith("WSD"):
+        reason = (
+            "порт WSD не хранит адрес принтера — укажите его в настройке snmp_host "
+            "или переустановите принтер на «Стандартный порт TCP/IP»"
+        )
+    elif not IS_WINDOWS:
+        reason = "адрес порта читается только в Windows"
+    else:
+        reason = (
+            f"в настройках порта {port!r} адреса нет — укажите его в настройке snmp_host"
+        )
+    return PortAddress(port=port, community=community, monitor=monitor, reason=reason)
+
+
+def resolve_port(printer_name: str) -> PortAddress:
+    """То же, но порт берётся у самого принтера."""
+    from . import IS_WINDOWS
+
+    if not IS_WINDOWS:
+        return PortAddress(reason="адрес порта читается только в Windows")
+
+    from . import list_printers
+
+    info = next((p for p in list_printers() if p.name == printer_name), None)
+    if info is None:
+        return PortAddress(reason=f"принтер {printer_name!r} в системе не найден")
+    return describe_port(printer_name, info.port)
 
 
 def resolve_host(printer_name: str, port: str | None = None) -> str | None:
-    """Возвращает адрес принтера для SNMP, либо None для локального подключения."""
-    from . import IS_WINDOWS
-
-    if port is None:
-        if not IS_WINDOWS:
-            return None
-        from . import list_printers
-
-        info = next((p for p in list_printers() if p.name == printer_name), None)
-        port = info.port if info else ""
-
-    port = (port or "").strip()
-    if not port or port.upper().startswith(("USB", "LPT", "COM", "FILE", "NUL", "PORTPROMPT")):
-        # Локальное подключение — SNMP тут неоткуда взяться.
-        return None
-
-    address = None
-    if IS_WINDOWS:
-        address = _from_registry(port)
-    address = address or _from_port_name(port)
-
-    if address:
-        logger.debug("Принтер %r: адрес для SNMP — %s (порт %s)", printer_name, address, port)
-    else:
-        logger.debug("Принтер %r: адрес по порту %r не определён", printer_name, port)
-    return address
+    """Короткий ответ: адрес принтера либо None."""
+    found = describe_port(printer_name, port) if port is not None else resolve_port(printer_name)
+    return found.host

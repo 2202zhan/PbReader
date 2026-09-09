@@ -218,19 +218,23 @@ def cmd_printers(args: argparse.Namespace, config: Config) -> int:
 
 def _print_telemetry(printer: str, config: Config) -> None:
     """Показывает то, что знает только сам аппарат: счётчик, бумагу, тонер."""
-    from .printers import read_telemetry, resolve_snmp_host
+    from .printers import read_telemetry, resolve_snmp
 
-    if not config.snmp_enabled:
-        return
-    address = resolve_snmp_host(printer, config.snmp_host)
-    if not address:
-        print("  по сети: подключён локально — опросить нечем")
+    target = resolve_snmp(printer, host=config.snmp_host, community=config.snmp_community,
+                          enabled=config.snmp_enabled)
+    if not target.available:
+        # Причину печатаем всегда: «телеметрии нет» без объяснения — это то,
+        # из-за чего её однажды никто и не заметил.
+        print(f"  по сети: НЕТ — {target.reason}")
         return
 
+    address = target.host
     info = read_telemetry(printer, community=config.snmp_community,
-                          host=config.snmp_host, timeout=config.snmp_timeout)
+                          host=config.snmp_host, timeout=config.snmp_timeout,
+                          enabled=config.snmp_enabled)
     if not info.reachable:
-        print(f"  по сети ({address}): не отвечает — {info.error}")
+        print(f"  по сети ({address}, community {target.community!r}): не отвечает — {info.error}")
+        print("     проверьте, что SNMP включён в веб-интерфейсе аппарата и community совпадает")
         return
 
     print(f"  по сети ({address}): {info.model or 'аппарат'}"
@@ -260,6 +264,9 @@ def cmd_diagnose(args: argparse.Namespace, config: Config) -> int:
     if not printer:
         print("Принтер не задан, и принтера по умолчанию в системе нет")
         return 2
+
+    if getattr(args, "snmp_host", None):
+        config.snmp_host = args.snmp_host
 
     report = diagnose(printer)
     if args.json:
@@ -409,6 +416,8 @@ def build_parser() -> argparse.ArgumentParser:
         "diagnose", help="почему на бумаге пусто: возможности драйвера и пробная страница"
     )
     checkup.add_argument("--printer", help="имя принтера (по умолчанию — системный)")
+    checkup.add_argument("--snmp-host", dest="snmp_host",
+                         help="проверить телеметрию по этому адресу, минуя определение по порту")
     checkup.add_argument("--test-page", action="store_true", dest="test_page",
                          help="напечатать пробную страницу мимо PDF")
     checkup.add_argument("--json", action="store_true")

@@ -51,7 +51,7 @@ from .printers import (
     list_printers,
     preflight,
     read_telemetry,
-    resolve_snmp_host,
+    resolve_snmp,
 )
 from .session import SessionExpired, SessionStore
 
@@ -396,6 +396,7 @@ class _Handler(BaseHTTPRequestHandler):
         status = None
         if result.job_id:
             config = self.server.config
+            target = self._snmp_target(result.printer)
             status = self.server.jobs.register(
                 result.job_id,
                 result.printer,
@@ -403,11 +404,16 @@ class _Handler(BaseHTTPRequestHandler):
                 session.document.path.name,
                 # Счётчик механизма снимается прямо сейчас: после него ответ
                 # «напечатано» перестанет быть догадкой.
-                snmp_host=self._snmp_host(result.printer),
-                community=config.snmp_community,
+                snmp_host=target.host,
+                community=target.community,
                 expected_sheets=result.sheets,
                 snmp_timeout=config.snmp_timeout,
             ).to_dict()
+            if not target.available:
+                logger.info(
+                    "Задание %d: подтвердить печать счётчиком аппарата нечем — %s",
+                    result.job_id, target.reason,
+                )
 
         return self._json({"submitted": True, "status": status, **asdict(result)})
 
@@ -426,11 +432,12 @@ class _Handler(BaseHTTPRequestHandler):
             },
         })
 
-    def _snmp_host(self, printer: str) -> str | None:
+    def _snmp_target(self, printer: str):
         config = self.server.config
-        if not config.snmp_enabled:
-            return None
-        return resolve_snmp_host(printer, config.snmp_host)
+        return resolve_snmp(
+            printer, host=config.snmp_host, community=config.snmp_community,
+            enabled=config.snmp_enabled,
+        )
 
     def _telemetry(self, query: dict[str, list[str]]) -> None:
         """Что аппарат рассказывает о себе: счётчик, бумага, тонер, неполадки."""
@@ -438,13 +445,12 @@ class _Handler(BaseHTTPRequestHandler):
         printer = (query.get("printer") or [config.printer or (default_printer() if IS_WINDOWS else "")])[0]
         if not printer:
             raise ServiceError(HTTPStatus.BAD_REQUEST, "Не указан принтер", "no_printer")
-        if not config.snmp_enabled:
-            return self._json({"reachable": False, "error": "Опрос по сети выключен в настройках"})
+        target = self._snmp_target(printer)
         info = read_telemetry(
-            printer, community=config.snmp_community,
-            host=config.snmp_host, timeout=config.snmp_timeout,
+            printer, community=config.snmp_community, host=config.snmp_host,
+            timeout=config.snmp_timeout, enabled=config.snmp_enabled,
         )
-        return self._json({"printer": printer, **info.to_dict()})
+        return self._json({"printer": printer, "target": target.to_dict(), **info.to_dict()})
 
     def _preflight(self, query: dict[str, list[str]]) -> None:
         """Можно ли принимать оплату: готов ли аппарат, есть ли бумага и тонер."""
