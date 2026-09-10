@@ -65,7 +65,10 @@ except ImportError:
 
 import logging  # noqa: E402
 
-LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "print.log")
+# Журнал называется по имени самого скрипта: print.py пишет в print.log, как и
+# раньше (его читает main.js по команде get_logs), а пробная копия рядом —
+# print_pbreader.py — в свой файл и боевой журнал не засоряет.
+LOG_PATH = os.path.splitext(os.path.abspath(__file__))[0] + ".log"
 LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
 
 # Журнал остаётся print.log рядом со скриптом — его читает main.js по команде

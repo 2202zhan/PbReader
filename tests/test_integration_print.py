@@ -109,6 +109,21 @@ class TestProtocol:
         run(directory, {"file_url": str(document)})
         assert (directory / "print.log").is_file()
 
+    def test_a_trial_copy_writes_to_its_own_log(self, kiosk):
+        """Пробовать новый путь печати надо, не трогая боевой print.py и не
+        засоряя журнал, который читает main.js. Копия под другим именем пишет
+        в свой файл."""
+        directory, document = kiosk
+        shutil.copy(SCRIPT, directory / "print_pbreader.py")
+        subprocess.run(
+            [sys.executable, str(directory / "print_pbreader.py")],
+            input=json.dumps({"file_url": str(document)}),
+            capture_output=True, text=True, cwd=directory,
+            env={**os.environ, "PYTHONPATH": str(PROJECT)}, timeout=120,
+        )
+        assert (directory / "print_pbreader.log").is_file()
+        assert not (directory / "print.log").exists()
+
     def test_it_works_without_log_rotation_but_says_so(self, kiosk):
         """Отсутствие log_rotation.py — не повод не печатать, но и молчать
         нельзя: без ротации журнал будет расти без предела."""
