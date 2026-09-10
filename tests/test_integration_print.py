@@ -212,9 +212,7 @@ class TestExitCodes:
         outcome = result_line(run(directory, {"copy_count": 1}).stdout)
         assert outcome["reason"] == "bad_request"
 
-    def test_extended_codes_are_opt_in(self, kiosk, make_pdf):
-        from pbreader.paper import A4
-
+    def test_extended_codes_are_opt_in(self, kiosk):
         directory, document = kiosk
         env = {"PBREADER_EXIT_CODES": "extended"}
         # Задание не приняли — 2.

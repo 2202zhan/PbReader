@@ -394,7 +394,7 @@ cli.py        команды
 ## Что проверено
 
 ```bash
-pytest        # 323 теста
+pytest        # 322 теста
 ```
 
 Главный из них — `tests/test_raster.py::TestPreviewMatchesPrint`: собирает
