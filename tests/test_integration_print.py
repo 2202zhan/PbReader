@@ -168,7 +168,7 @@ class TestChangedBehaviour:
         лоток по умолчанию. Молчание здесь хуже отказа."""
         directory, document = kiosk
         done = run(directory, {"file_url": str(document), "tray_bin": "Tray 2"})
-        assert done.returncode == 2
+        assert done.returncode == 1
         assert "DMBIN" in result_line(done.stdout)["error"]
 
     def test_a_book_is_refused_by_its_real_format(self, kiosk):
@@ -184,24 +184,47 @@ class TestChangedBehaviour:
         book.write_bytes(buffer.getvalue())
 
         done = run(directory, {"file_url": str(book)})
-        assert done.returncode == 2
+        assert done.returncode == 1
         assert "EPUB" in result_line(done.stdout)["error"]
 
 
 class TestExitCodes:
-    def test_missing_file_fails(self, kiosk):
-        directory, _ = kiosk
-        assert run(directory, {"file_url": str(directory / "нет-такого.pdf")}).returncode == 1
+    """Коды возврата — часть контракта с main.js, и менять его вслепую нельзя.
 
-    def test_no_file_in_parameters(self, kiosk):
-        directory, _ = kiosk
-        assert run(directory, {"copy_count": 1}).returncode == 2
+    Старый print.py возвращал только 0 и 1. Если main.js проверяет «код равен
+    1», то любое новое значение сойдёт за успех, и непринятое задание молча
+    превратится в напечатанное. Поэтому по умолчанию всё как было, а разделение
+    включается явно.
+    """
 
-    def test_garbage_on_stdin(self, kiosk):
+    @pytest.mark.parametrize("params", [
+        {"file_url": "нет-такого.pdf"},
+        {"copy_count": 1},
+        "не json вовсе",
+    ])
+    def test_every_failure_returns_one_by_default(self, kiosk, params):
         directory, _ = kiosk
-        done = run(directory, "не json вовсе")
-        assert done.returncode == 2
-        assert "не JSON" in done.stdout
+        assert run(directory, params).returncode == 1
+
+    def test_the_reason_is_always_in_the_log(self, kiosk):
+        """Различать причины всё-таки надо — но в журнале, а не кодом."""
+        directory, _ = kiosk
+        outcome = result_line(run(directory, {"copy_count": 1}).stdout)
+        assert outcome["reason"] == "bad_request"
+
+    def test_extended_codes_are_opt_in(self, kiosk, make_pdf):
+        from pbreader.paper import A4
+
+        directory, document = kiosk
+        env = {"PBREADER_EXIT_CODES": "extended"}
+        # Задание не приняли — 2.
+        assert run(directory, {"file_url": str(document), "tray_bin": "Tray 2"}, env).returncode == 2
+        # Печать не удалась — по-прежнему 1.
+        assert run(directory, {"file_url": str(document)}, env).returncode == 1
+
+    def test_garbage_on_stdin_is_named_in_the_log(self, kiosk):
+        directory, _ = kiosk
+        assert "не JSON" in run(directory, "не json вовсе").stdout
 
 
 class TestInstallInstructions:

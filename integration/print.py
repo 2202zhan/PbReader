@@ -43,6 +43,14 @@ SumatraPDF это работало, через Foxit DEVMODE.DefaultSource пр�
 «спулер принял задание»: между этими событиями помещается и замятие, и конец
 бумаги. Если в main.js стоит короткий таймаут на процесс, большое задание в
 него не уложится — тогда поднимите таймаут либо выставьте PBREADER_NO_WAIT=1.
+
+КОДЫ ВОЗВРАТА ОСТАЛИСЬ ПРЕЖНИМИ: 0 и 1, как у старого print.py. Разделить
+«не напечаталось» и «задание вообще не приняли» было бы полезно, но main.js
+читает этот код, и вводить в его контракт новое значение вслепую нельзя: если
+он проверяет «код равен 1», то любой другой код сойдёт за успех, и непринятое
+задание молча превратится в напечатанное. Причина всегда есть в журнале, в
+строке RESULT, полем «reason». Отдельные коды включаются явно:
+PBREADER_EXIT_CODES=extended — тогда 2 означает «задание не принято».
 """
 
 import json
@@ -101,11 +109,19 @@ def _result(payload):
     logger.info("RESULT: %s", json.dumps(payload, ensure_ascii=False))
 
 
-def _fail(message, code=1):
+#: Категории неудач. В журнал попадают всегда; на код возврата влияют только
+#: при PBREADER_EXIT_CODES=extended.
+REASON_BAD_REQUEST = "bad_request"      # задание не приняли: файл, формат, параметры
+REASON_PRINT_FAILED = "print_failed"    # печать не удалась: принтер, замятие, сбой
+
+
+def _fail(message, reason=REASON_PRINT_FAILED):
     """Единственный способ закончить неудачей: строка в журнал и код возврата."""
     logger.error(message)
-    _result({"ok": False, "error": message})
-    sys.exit(code)
+    _result({"ok": False, "error": message, "reason": reason})
+
+    extended = os.environ.get("PBREADER_EXIT_CODES", "").strip().lower() == "extended"
+    sys.exit(2 if (extended and reason == REASON_BAD_REQUEST) else 1)
 
 
 try:
@@ -143,12 +159,12 @@ def main():
     try:
         params = json.load(sys.stdin)
     except ValueError as exc:
-        _fail(f"На stdin не JSON: {exc}", code=2)
+        _fail(f"На stdin не JSON: {exc}", REASON_BAD_REQUEST)
     logger.info(f"Parameters received: {params}")
 
     source = params.get("file_url") or params.get("file") or params.get("path")
     if not source:
-        _fail("В параметрах нет ссылки на файл (file_url)", code=2)
+        _fail("В параметрах нет ссылки на файл (file_url)", REASON_BAD_REQUEST)
 
     config = Config.load()
     config.work_dir = Path(output_dir)
@@ -167,7 +183,7 @@ def main():
         job = _job_from_params(params)
     except ValueError as exc:
         # Сюда попадает и нечисловой лоток — сообщение объясняет, что делать.
-        _fail(str(exc), code=2)
+        _fail(str(exc), REASON_BAD_REQUEST)
 
     logger.info(
         f"Selected printer: {job.printer}, Copies: {job.copies}, "
@@ -189,7 +205,7 @@ def main():
         )
     except UnsupportedFormat as exc:
         # Человек принёс не тот файл — это про файл, а не про поломку.
-        _fail(str(exc), code=2)
+        _fail(str(exc), REASON_BAD_REQUEST)
     except Exception as exc:
         _fail(f"Не удалось подготовить документ: {exc}")
 
