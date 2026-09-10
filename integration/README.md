@@ -4,10 +4,28 @@
 
 **Нет.** SumatraPDF и Foxit — чужие программы: их надо было найти на диске,
 развернуть ярлык, поискать в реестре, запустить процессом и надеяться, что они
-поймут флаги. PbReader — библиотека этого же Python, она импортируется.
+поймут флаги. PbReader — обычный пакет Python: он ставится в окружение и
+импортируется.
 
+**В PyPI его нет** — ставится из исходников. Три способа, по возрастанию
+пригодности для парка аппаратов:
+
+```powershell
+pip install .                                   # из каталога с репозиторием
+pip install git+https://github.com/2202zhan/PbReader.git@<ветка>
+pip install pbreader-0.1.0-py3-none-any.whl     # из колеса
 ```
-pip install pbreader
+
+Для парка правильнее третий: колесо собирается один раз
+(`python -m build --wheel`), кладётся в общую папку и ставится на каждый киоск
+без git и без доступа к GitHub. Версия при этом одна и та же везде — а это
+именно то, чего хочется, когда аппаратов больше одного.
+
+Ставить надо в **тот же Python**, которым `main.js` запускает `print.py`.
+Проверить, что попало куда надо:
+
+```powershell
+python -c "import pbreader; print(pbreader.__version__, pbreader.__file__)"
 ```
 
 `SUMATRA_PATH` и `FOXIT_PATH` в `config.py` после этого ни на что не влияют.
@@ -18,7 +36,7 @@ pip install pbreader
 
 ## Как переключиться
 
-1. `pip install pbreader` — в тот же Python, которым `main.js` запускает `print.py`.
+1. Поставить пакет (см. выше) — в тот же Python, которым `main.js` запускает `print.py`.
 2. Заменить `print.py` файлом отсюда. `config.py` и `log_rotation.py` оставить.
 3. `main.js` не трогать.
 

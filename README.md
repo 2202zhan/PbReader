@@ -74,6 +74,15 @@ pip install -e .            # ядро: pypdfium2, pillow, requests
 pip install -e ".[windows]" # на аппарате: + pywin32, comtypes
 ```
 
+В PyPI пакета нет: `pip install pbreader` не сработает. Для парка аппаратов
+соберите колесо один раз и ставьте его — так версия везде одинаковая и не нужен
+ни git, ни доступ к GitHub:
+
+```bash
+python -m build --wheel                             # → dist/pbreader-0.1.0-py3-none-any.whl
+pip install pbreader-0.1.0-py3-none-any.whl
+```
+
 Python 3.10+. `pypdfium2` ставится готовым бинарником, компилятор не нужен.
 
 Настройки — `pbreader.json` рядом с программой или переменные `PBREADER_*`:
@@ -212,8 +221,9 @@ confirmed: false` — «скорее всего вышло, подтвержде
 
 **Пути к программе, как `SUMATRA_PATH`, не требуется.** SumatraPDF и Foxit —
 чужие программы: их надо было найти на диске и запустить процессом. PbReader —
-библиотека этого же Python, она импортируется: `pip install pbreader`, и всё.
-`SUMATRA_PATH` с `FOXIT_PATH` после этого ни на что не влияют.
+обычный пакет Python: ставится в окружение и импортируется. В PyPI его нет,
+ставится из исходников — `pip install .` из репозитория либо из собранного
+колеса. `SUMATRA_PATH` с `FOXIT_PATH` после этого ни на что не влияют.
 
 Протокол снаружи прежний: JSON на stdin, **в stdout только журнал** (посторонних
 строк там нет, как и раньше), `print.log` рядом со скриптом, итог — кодом
@@ -384,7 +394,7 @@ cli.py        команды
 ## Что проверено
 
 ```bash
-pytest        # 316 тестов
+pytest        # 318 тестов
 ```
 
 Главный из них — `tests/test_raster.py::TestPreviewMatchesPrint`: собирает

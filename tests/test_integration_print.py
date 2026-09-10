@@ -187,3 +187,29 @@ class TestExitCodes:
         done = run(directory, "не json вовсе")
         assert done.returncode == 2
         assert "не JSON" in done.stdout
+
+
+class TestInstallInstructions:
+    """Указания по установке — тоже часть работы.
+
+    Неверная команда в сообщении об ошибке на киоске стоит выезда на место:
+    человек читает её и делает ровно то, что написано.
+    """
+
+    def test_the_advice_does_not_send_anyone_to_pypi(self):
+        """Пакета «pbreader» в PyPI нет: такая команда просто не сработает."""
+        for path in (SCRIPT, PROJECT / "integration" / "README.md", PROJECT / "README.md"):
+            text = path.read_text(encoding="utf-8")
+            for line in text.splitlines():
+                if "pip install pbreader" in line and ".whl" not in line and "git+" not in line:
+                    assert "не сработает" in line or "нет" in line, (
+                        f"{path.name}: строка советует несуществующий пакет — {line.strip()}"
+                    )
+
+    def test_the_error_names_a_command_that_works(self, kiosk):
+        """Библиотеки нет — сообщение обязано сказать, чем это лечится."""
+        directory, document = kiosk
+        done = run(directory, {"file_url": str(document)}, {"PYTHONPATH": str(directory)})
+        assert done.returncode == 1
+        assert "pip install ." in done.stdout
+        assert str(sys.executable) in done.stdout or "не установлен" in done.stdout
