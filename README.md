@@ -208,14 +208,22 @@ confirmed: false` — «скорее всего вышло, подтвержде
 ### Переход с прежнего print.py
 
 Замена лежит в [`integration/print.py`](integration/README.md) — кладётся вместо
-старого файла, `main.js` и `config.py` менять не нужно. Протокол тот же: JSON на
-stdin, JSON в stdout, код возврата 0 или 1; имя принтера и рабочий каталог
-по-прежнему берутся из вашего `config.py`.
+старого файла, `main.js`, `config.py` и `log_rotation.py` менять не нужно.
+
+**Пути к программе, как `SUMATRA_PATH`, не требуется.** SumatraPDF и Foxit —
+чужие программы: их надо было найти на диске и запустить процессом. PbReader —
+библиотека этого же Python, она импортируется: `pip install pbreader`, и всё.
+`SUMATRA_PATH` с `FOXIT_PATH` после этого ни на что не влияют.
+
+Протокол снаружи прежний: JSON на stdin, **в stdout только журнал** (посторонних
+строк там нет, как и раньше), `print.log` рядом со скриптом, итог — кодом
+возврата. Из `config.py` берутся `output_dirs`, `name_printer` и
+`TARGET_PAPER_SIZE`.
 
 Перед переключением поправить надо ровно одно: **лоток теперь число**. Номера
 для конкретного аппарата показывает `pbreader printers` — их и прописать в
-панели вместо названий вроде `Tray 2`. Подробности и порядок обкатки —
-в [`integration/README.md`](integration/README.md).
+панели вместо названий вроде `Tray 2`. Подробности, коды возврата и порядок
+обкатки — в [`integration/README.md`](integration/README.md).
 
 ### Разовая печать — как раньше
 
@@ -376,7 +384,7 @@ cli.py        команды
 ## Что проверено
 
 ```bash
-pytest        # 310 тестов
+pytest        # 316 тестов
 ```
 
 Главный из них — `tests/test_raster.py::TestPreviewMatchesPrint`: собирает
