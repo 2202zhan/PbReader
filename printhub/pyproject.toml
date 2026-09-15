@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "printhub"
+version = "0.1.0"
+description = "PrintHub — печать документов через Telegram Web App"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "sqlalchemy>=2.0",
+    "python-multipart>=0.0.9",  # приём файлов формой
+    "httpx>=0.27",              # обращения к Bot API и к сервису Kaspi
+]
+
+[project.optional-dependencies]
+# PbReader в PyPI нет: ставится из соседнего репозитория, `pip install -e ../PbReader`.
+dev = ["pytest>=7.4", "pytest-asyncio>=0.23", "reportlab>=4.0"]
+
+[project.scripts]
+printhub = "printhub.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["printhub*"]
+
+[tool.setuptools.package-data]
+printhub = ["web/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,136 @@
+/* Цвета берутся из темы телеграма: приложение должно выглядеть частью клиента,
+   а не чужой страницей внутри него. На настольном браузере переменных нет —
+   поэтому у каждой стоит запасное значение. */
+:root {
+  --bg: var(--tg-theme-bg-color, #ffffff);
+  --secondary-bg: var(--tg-theme-secondary-bg-color, #f2f3f5);
+  --text: var(--tg-theme-text-color, #1a1a1a);
+  --hint: var(--tg-theme-hint-color, #8b8f96);
+  --link: var(--tg-theme-link-color, #2f80ed);
+  --button: var(--tg-theme-button-color, #2f80ed);
+  --button-text: var(--tg-theme-button-text-color, #ffffff);
+  --danger: #e04a3f;
+  --radius: 14px;
+  color-scheme: light dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--secondary-bg);
+  color: var(--text);
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  overscroll-behavior: none;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.screen {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  -webkit-overflow-scrolling: touch;
+}
+
+h1 { font-size: 21px; margin: 4px 0 2px; }
+h2 { font-size: 16px; margin: 20px 0 8px; }
+.hint { color: var(--hint); font-size: 13px; margin: 0 0 16px; }
+
+.card {
+  background: var(--bg);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+
+.drop {
+  border: 1.5px dashed var(--hint);
+  border-radius: var(--radius);
+  background: var(--bg);
+  padding: 28px 18px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.drop:hover, .drop.over { border-color: var(--button); background: var(--secondary-bg); }
+.drop strong { display: block; margin-bottom: 4px; font-size: 16px; }
+.drop span { color: var(--hint); font-size: 13px; }
+
+.file {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+.file .icon {
+  width: 38px; height: 38px; flex: 0 0 38px;
+  display: grid; place-items: center;
+  border-radius: 10px;
+  background: var(--secondary-bg);
+  font-size: 11px; font-weight: 700; letter-spacing: .3px;
+  color: var(--hint);
+  text-transform: uppercase;
+}
+.file .body { min-width: 0; flex: 1; }
+.file .name {
+  font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.file .meta { color: var(--hint); font-size: 12.5px; margin-top: 2px; }
+.file button {
+  background: none; border: 0; padding: 8px;
+  color: var(--hint); cursor: pointer; font-size: 17px; line-height: 1;
+}
+.file button:hover { color: var(--danger); }
+
+.tabs {
+  display: flex;
+  background: var(--bg);
+  border-top: 1px solid color-mix(in srgb, var(--hint) 25%, transparent);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.tabs button {
+  flex: 1; border: 0; background: none; cursor: pointer;
+  padding: 9px 4px 7px;
+  color: var(--hint); font-size: 11px; font-family: inherit;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+}
+.tabs button.active { color: var(--link); }
+.tabs .glyph { display: flex; line-height: 1; }
+
+.primary {
+  width: 100%;
+  border: 0; border-radius: 10px;
+  background: var(--button); color: var(--button-text);
+  padding: 13px; font-size: 15px; font-weight: 600; font-family: inherit;
+  cursor: pointer;
+}
+.primary:disabled { opacity: .55; cursor: default; }
+
+.notice { border-radius: var(--radius); padding: 12px 14px; font-size: 13.5px; margin-bottom: 12px; }
+.notice.error { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+.notice.warn { background: color-mix(in srgb, #e8a33d 18%, transparent); }
+
+.progress { height: 4px; border-radius: 2px; background: var(--secondary-bg); overflow: hidden; margin-top: 12px; }
+.progress i { display: block; height: 100%; background: var(--button); transition: width .12s linear; }
+
+.empty { text-align: center; color: var(--hint); padding: 44px 20px; }
+.empty .glyph { display: flex; justify-content: center; margin-bottom: 10px; opacity: .5; }
+
+.rows { background: var(--bg); border-radius: var(--radius); overflow: hidden; }
+.row { display: flex; justify-content: space-between; gap: 16px; padding: 12px 16px; }
+.row + .row { border-top: 1px solid color-mix(in srgb, var(--hint) 18%, transparent); }
+.row span:first-child { color: var(--hint); }
+.row span:last-child { text-align: right; overflow-wrap: anywhere; }

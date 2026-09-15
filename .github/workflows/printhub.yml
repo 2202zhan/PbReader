@@ -1,0 +1,56 @@
+name: PrintHub
+
+# Workflow лежит в корне не для красоты: GitHub читает .github/workflows только
+# отсюда, и файл внутри printhub/ просто не запускался бы.
+on:
+  push:
+    paths: ["printhub/**", ".github/workflows/printhub.yml"]
+  pull_request:
+    paths: ["printhub/**", ".github/workflows/printhub.yml"]
+
+defaults:
+  run:
+    working-directory: printhub
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # PbReader лежит на уровень выше — в том же репозитории.
+      - run: pip install ..
+      - run: pip install -e ".[dev]"
+      - run: python -m pytest -q
+
+  secrets:
+    # Токен бота, попавший в историю git, остаётся там навсегда, а отзывать его
+    # приходится вручную. Дешевле не дать ему туда попасть.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+      - name: Искать токены телеграма в коде
+        run: |
+          if grep -rInE '[0-9]{8,10}:AA[A-Za-z0-9_-]{30,}' \
+               --exclude-dir=.git --exclude-dir=node_modules .; then
+            echo "::error::В коде найден токен бота — отзовите его в @BotFather и уберите из файлов"
+            exit 1
+          fi
+          echo "Токенов не найдено"
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+        working-directory: printhub/frontend
+      - run: npm run build
+        working-directory: printhub/frontend
