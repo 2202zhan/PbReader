@@ -186,6 +186,7 @@ class OrderState:
     DONE = "done"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    REFUNDED = "refunded"
 
     #: Состояния, в которых заказ ещё можно править.
     EDITABLE = {DRAFT}
@@ -232,4 +233,101 @@ class Order(Base):
             "currency": self.currency,
             "editable": self.state in OrderState.EDITABLE,
             "created_at": as_utc(self.created_at),
+        }
+
+
+class PaymentState:
+    PENDING = "pending"      # счёт выставлен, человек ещё не заплатил
+    PAID = "paid"
+    FAILED = "failed"
+    EXPIRED = "expired"
+    REFUNDED = "refunded"
+    #: Сумма в подтверждении не совпала с суммой заказа. Само по себе это не
+    #: оплата и не отказ — это повод разобраться руками, а не списать молча.
+    MISMATCH = "mismatch"
+
+    FINAL = {PAID, FAILED, EXPIRED, REFUNDED}
+
+
+class Payment(Base):
+    __tablename__ = "payments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    order_id: Mapped[str] = mapped_column(ForeignKey("orders.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(32), default="kaspi")
+    #: Номер операции у платёжной стороны. По нему приходит подтверждение,
+    #: поэтому он уникален: два платежа с одним номером означали бы, что
+    #: непонятно, какой заказ оплачен.
+    external_id: Mapped[str | None] = mapped_column(String(128), nullable=True, unique=True)
+    amount: Mapped[int] = mapped_column(Integer, default=0)
+    currency: Mapped[str] = mapped_column(String(8), default="KZT")
+    state: Mapped[str] = mapped_column(String(32), default=PaymentState.PENDING, index=True)
+    #: Ссылка, открывающая приложение Kaspi на экране оплаты.
+    pay_url: Mapped[str] = mapped_column(Text, default="")
+    receipt_url: Mapped[str] = mapped_column(Text, default="")
+    problem: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+    paid_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "order_id": self.order_id,
+            "state": self.state,
+            "amount": self.amount,
+            "currency": self.currency,
+            "pay_url": self.pay_url,
+            "receipt_url": self.receipt_url,
+            "problem": self.problem,
+            "created_at": as_utc(self.created_at),
+            "paid_at": as_utc(self.paid_at),
+        }
+
+
+class WebhookEvent(Base):
+    """Уже обработанные подтверждения.
+
+    Платёжная сторона повторяет доставку до трёх раз, и повтор обязан ничего не
+    менять: иначе один платёж закрыл бы заказ дважды, а возврат ушёл бы дважды
+    следом. Ключ — операция плюс событие: это ровно то, что повторяется.
+    """
+
+    __tablename__ = "webhook_events"
+
+    id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    received_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class MerchantSession(Base):
+    """Доступ к кассе Kaspi.
+
+    Сервис kaspi-pos-automation после входа по SMS отдаёт три значения, и
+    дальше все запросы идут с ними. Живут они ограниченно, а продлеваются
+    только новым SMS — то есть руками. Поэтому лежат в базе и меняются из
+    админки: перезапускать сервер ради протухшей сессии никуда не годится.
+
+    Это секреты. В ответах админки они не показываются — только признак, что
+    заданы, и когда обновлялись.
+    """
+
+    __tablename__ = "merchant_sessions"
+
+    provider: Mapped[str] = mapped_column(String(32), primary_key=True)
+    token_sn: Mapped[str] = mapped_column(Text, default="")
+    vtoken_secret: Mapped[str] = mapped_column(Text, default="")
+    profile_id: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    @property
+    def is_set(self) -> bool:
+        return bool(self.token_sn and self.vtoken_secret)
+
+    def to_dict(self) -> dict:
+        return {
+            "provider": self.provider,
+            "configured": self.is_set,
+            "updated_at": as_utc(self.updated_at),
         }

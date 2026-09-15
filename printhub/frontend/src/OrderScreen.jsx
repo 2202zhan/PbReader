@@ -233,7 +233,7 @@ export default function OrderScreen({ order: initial, onChange, onClose, onConfi
         <button type="button" className="primary" disabled={busy || !order.amount} onClick={confirm}>
           {busy ? 'Считаю…' : 'Заказать'}
         </button>
-        <p className="hint small center">Оплата появится в следующей версии.</p>
+        <p className="hint small center">Дальше — оплата через Kaspi.</p>
       </div>
     </>
   );

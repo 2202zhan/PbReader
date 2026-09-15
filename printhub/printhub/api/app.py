@@ -11,20 +11,32 @@ HTTP-сторона PrintHub.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 import uuid
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
-from .. import db, jobs, orders, sessions, storage
+from .. import billing, db, jobs, orders, payments, sessions, storage
 from ..config import SESSION_TTL_SECONDS, Settings
 from ..models import File as FileRow
-from ..models import Order, OrderState, Printer, TariffRow, User, as_utc, now
+from ..models import (
+    MerchantSession,
+    Order,
+    OrderState,
+    Payment,
+    PaymentState,
+    Printer,
+    TariffRow,
+    User,
+    as_utc,
+    now,
+)
 from ..telegram.initdata import InitDataError, TelegramUser, validate
 
 logger = logging.getLogger("printhub")
@@ -63,6 +75,16 @@ class PrinterForm(BaseModel):
     is_active: bool = True
 
 
+class MerchantForm(BaseModel):
+    token_sn: str
+    vtoken_secret: str
+    profile_id: str = ""
+
+
+class RefundForm(BaseModel):
+    reason: str = ""
+
+
 class TariffForm(BaseModel):
     price_mono: int
     price_color: int
@@ -80,6 +102,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="PrintHub", version="0.1.0")
     app.state.settings = settings
     _bootstrap(settings)
+
+    def merchant_credentials():
+        with db.session_scope() as session:
+            return session.get(MerchantSession, "kaspi")
+
+    provider = payments.build_provider(settings, merchant_credentials)
+    app.state.payment_provider = provider
 
     if settings.dev_login:
         logger.warning(
@@ -511,6 +540,143 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 ]
             }
 
+    # ─── оплата ───
+
+    @app.post("/api/orders/{order_id}/pay")
+    def pay(order_id: str, user: User = Depends(current_user)):
+        """Выставляет счёт и отдаёт ссылку, открывающую приложение Kaspi."""
+        with db.session_scope() as session:
+            order = _own_order(order_id, user, session)
+            try:
+                payment = billing.start(session, order, provider)
+            except billing.BillingProblem as exc:
+                raise HTTPException(409, str(exc)) from None
+            session.flush()
+            return payment.to_dict()
+
+    @app.get("/api/orders/{order_id}/payment")
+    def payment_state(order_id: str, user: User = Depends(current_user)):
+        """Состояние оплаты.
+
+        Заодно спрашиваем платёжную сторону: подтверждение приходит вебхуком, а
+        вебхук может не дойти. Без этого оплаченный заказ завис бы в «ждёт
+        оплаты», а деньги остались бы у нас.
+        """
+        with db.session_scope() as session:
+            order = _own_order(order_id, user, session)
+            payment = billing.paid_payment(session, order.id) or billing.pending_payment(
+                session, order.id
+            )
+            if payment is None:
+                return {"payment": None, "order_state": order.state}
+            payment = billing.sync(session, payment, provider)
+            session.flush()
+            session.refresh(order)
+            return {"payment": payment.to_dict(), "order_state": order.state}
+
+    @app.post("/api/payments/kaspi/webhook")
+    async def kaspi_webhook(request: Request):
+        """Подтверждение оплаты от сервиса Kaspi.
+
+        Адрес открытый — иначе сервис до него не достучится, — поэтому всё
+        доверие держится на подписи. Проверяем её по СЫРОМУ телу: разобрать
+        JSON и собрать обратно нельзя, порядок ключей изменится.
+        """
+        raw = await request.body()
+        signature = request.headers.get("X-Webhook-Signature", "")
+        if not billing.verify_signature(raw, signature, settings.kaspi_webhook_secret):
+            logger.warning("Вебхук с неверной подписью, отклонён")
+            raise HTTPException(401, "Подпись не сошлась")
+
+        try:
+            body = json.loads(raw)
+        except ValueError:
+            raise HTTPException(400, "Не JSON") from None
+
+        event = str(body.get("event") or "")
+        external_id = str(body.get("paymentId") or "")
+        state = payments.STATE_BY_EVENT.get(event)
+        if not external_id or state is None:
+            # Неизвестное событие — отвечаем «принято», чтобы сервис не
+            # повторял доставку бесконечно, но ничего не делаем.
+            logger.info("Вебхук с неизвестным событием %r, пропущен", event)
+            return {"ignored": True}
+
+        with db.session_scope() as session:
+            if not billing.remember_event(session, f"{external_id}:{event}", body):
+                # Сервис доставляет до трёх раз. Повтор обязан ничего не менять.
+                return {"duplicate": True}
+
+            payment = session.scalar(select(Payment).where(Payment.external_id == external_id))
+            if payment is None:
+                logger.warning("Вебхук про неизвестную операцию %s", external_id)
+                return {"ignored": True}
+
+            billing.apply(
+                session, payment, state,
+                receipt_url=str(body.get("receiptUrl") or ""),
+                reported_amount=_as_int(body.get("amount")),
+            )
+            session.flush()
+            return {"ok": True, "state": payment.state}
+
+    @app.post("/api/payments/dev/{external_id}/{result}")
+    def dev_payment_result(external_id: str, result: str):
+        """Оплата понарошку — кнопка вместо приложения Kaspi.
+
+        Существует только вместе с PRINTHUB_DEV_LOGIN: на боевом сервере это
+        была бы бесплатная печать для всех желающих.
+        """
+        if not settings.dev_login:
+            raise HTTPException(404, "Not found")
+        if result not in ("paid", "failed", "expired"):
+            raise HTTPException(400, "Бывает paid, failed или expired")
+
+        provider.mark(external_id, result)
+        with db.session_scope() as session:
+            payment = session.scalar(select(Payment).where(Payment.external_id == external_id))
+            if payment is None:
+                raise HTTPException(404, "Платёж не найден")
+            billing.apply(session, payment, result, reported_amount=payment.amount)
+            session.flush()
+            return payment.to_dict()
+
+    @app.post("/api/admin/orders/{order_id}/refund")
+    def admin_refund(order_id: str, body: RefundForm, _: User = Depends(admin)):
+        with db.session_scope() as session:
+            order = session.get(Order, order_id)
+            if order is None:
+                raise HTTPException(404, "Заказ не найден")
+            try:
+                payment = billing.refund(session, order, provider, body.reason)
+            except billing.BillingProblem as exc:
+                raise HTTPException(409, str(exc)) from None
+            session.flush()
+            return payment.to_dict()
+
+    @app.get("/api/admin/merchant")
+    def admin_merchant(_: User = Depends(admin)):
+        """Подключена ли касса. Сами значения наружу не отдаются никогда."""
+        with db.session_scope() as session:
+            row = session.get(MerchantSession, "kaspi")
+            return {
+                "merchant": row.to_dict() if row else {"provider": "kaspi", "configured": False},
+                "provider": provider.name,
+            }
+
+    @app.put("/api/admin/merchant")
+    def admin_set_merchant(body: MerchantForm, user: User = Depends(admin)):
+        with db.session_scope() as session:
+            row = session.get(MerchantSession, "kaspi") or MerchantSession(provider="kaspi")
+            row.token_sn = body.token_sn.strip()
+            row.vtoken_secret = body.vtoken_secret.strip()
+            row.profile_id = body.profile_id.strip()
+            row.updated_at = now()
+            row.updated_by = user.id
+            session.add(row)
+            session.flush()
+            return row.to_dict()
+
     @app.get("/api/health")
     def health():
         return {
@@ -528,6 +694,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
 
     return app
+
+
+def _as_int(value) -> int | None:
+    try:
+        return int(round(float(value)))
+    except (TypeError, ValueError):
+        return None
 
 
 def _bootstrap(settings: Settings) -> None:

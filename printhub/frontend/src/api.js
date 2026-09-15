@@ -68,6 +68,11 @@ export const api = {
   createOrder: (body) => request('/orders', { method: 'POST', json: body }),
   updateOrder: (id, body) => request(`/orders/${id}`, { method: 'PATCH', json: body }),
   confirmOrder: (id) => request(`/orders/${id}/confirm`, { method: 'POST' }),
+  pay: (id) => request(`/orders/${id}/pay`, { method: 'POST' }),
+  paymentState: (id) => request(`/orders/${id}/payment`),
+  // Оплата понарошку: сервер принимает это только в режиме разработки.
+  devPay: (externalId, result) =>
+    request(`/payments/dev/${externalId}/${result}`, { method: 'POST' }),
   cancelOrder: (id) => request(`/orders/${id}`, { method: 'DELETE' }),
 
   adminPrinters: () => request('/admin/printers'),

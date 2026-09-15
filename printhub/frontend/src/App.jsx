@@ -5,6 +5,7 @@ import FileList from './FileList';
 import Upload from './Upload';
 import Orders from './Orders';
 import OrderScreen from './OrderScreen';
+import PayScreen from './PayScreen';
 import Admin from './Admin';
 import { filesWord, pagesWord } from './format';
 import { CogIcon, FolderIcon, PersonIcon, PrinterIcon, ReceiptIcon } from './icons';
@@ -16,6 +17,7 @@ export default function App() {
   const [orders, setOrders] = useState([]);
   const [printers, setPrinters] = useState([]);
   const [openOrder, setOpenOrder] = useState(null);
+  const [payOrder, setPayOrder] = useState(null);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('starting');
   const [uploading, setUploading] = useState(false);
@@ -126,6 +128,16 @@ export default function App() {
 
   async function afterConfirm(order) {
     setOpenOrder(null);
+    setPayOrder(order);
+    setOrders(await api.orders().then((data) => data.orders));
+  }
+
+  async function afterPaid() {
+    setOrders(await api.orders().then((data) => data.orders));
+  }
+
+  async function closePay() {
+    setPayOrder(null);
     setTab('orders');
     setOrders(await api.orders().then((data) => data.orders));
   }
@@ -164,7 +176,9 @@ export default function App() {
   return (
     <div className="app">
       <div className="screen">
-        {openOrder ? (
+        {payOrder ? (
+          <PayScreen order={payOrder} onPaid={afterPaid} onClose={closePay} />
+        ) : openOrder ? (
           <OrderScreen
             order={openOrder}
             onChange={setOpenOrder}
@@ -217,8 +231,13 @@ export default function App() {
                 <p className="hint">
                   {waiting ? `${waiting} ждёт оплаты` : 'Здесь видно, что с вашими заказами'}
                 </p>
-                <Orders orders={orders} onOpen={(order) =>
-                  order.editable ? setOpenOrder(order) : null} />
+                <Orders
+                  orders={orders}
+                  onOpen={(order) => {
+                    if (order.editable) setOpenOrder(order);
+                    else if (order.state === 'awaiting_payment') setPayOrder(order);
+                  }}
+                />
               </>
             )}
 
@@ -256,7 +275,7 @@ export default function App() {
         )}
       </div>
 
-      {!openOrder && (
+      {!openOrder && !payOrder && (
         <nav className="tabs">
           {tabs.map((item) => (
             <button

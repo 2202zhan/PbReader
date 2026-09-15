@@ -63,6 +63,10 @@ class Settings:
     webapp_url: str = ""
     #: Кто видит админку. Номера в телеграме, через запятую.
     admin_ids: frozenset[int] = frozenset()
+    #: Адрес сервиса kaspi-pos-automation. Он рядом и наружу не смотрит.
+    kaspi_url: str = "http://127.0.0.1:3000"
+    #: Общий секрет с этим сервисом: им подписан вебхук об оплате.
+    kaspi_webhook_secret: str = ""
 
     def is_admin(self, user_id: int) -> bool:
         return user_id in self.admin_ids
@@ -90,6 +94,8 @@ class Settings:
             dev_login=_flag("PRINTHUB_DEV_LOGIN"),
             webapp_url=os.environ.get("PRINTHUB_WEBAPP_URL", "").strip(),
             admin_ids=_ids("PRINTHUB_ADMIN_IDS"),
+            kaspi_url=os.environ.get("PRINTHUB_KASPI_URL", "http://127.0.0.1:3000").strip(),
+            kaspi_webhook_secret=os.environ.get("PRINTHUB_KASPI_WEBHOOK_SECRET", "").strip(),
         )
         settings.validate()
         return settings
@@ -113,6 +119,13 @@ class Settings:
                 raise RuntimeError("PRINTHUB_BOT_TOKEN обязателен на боевом сервере")
             if not self.secret_key:
                 raise RuntimeError("PRINTHUB_SECRET_KEY обязателен на боевом сервере")
+            if not self.kaspi_webhook_secret:
+                # Без общего секрета подтверждение об оплате подделает кто
+                # угодно, кто знает адрес: печать станет бесплатной.
+                raise RuntimeError(
+                    "PRINTHUB_KASPI_WEBHOOK_SECRET обязателен: без него подтверждение "
+                    "об оплате нечем проверить"
+                )
 
         if not self.secret_key:
             # В разработке ключ можно и выдумать — но новый на каждый запуск,
