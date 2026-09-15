@@ -5,7 +5,7 @@ function badge(file) {
   return (file.format || '?').slice(0, 4);
 }
 
-export default function FileList({ files, onDelete, busyId }) {
+export default function FileList({ files, onDelete, onPrint, busyId }) {
   if (!files.length) {
     return (
       <div className="empty">
@@ -32,6 +32,16 @@ export default function FileList({ files, onDelete, busyId }) {
                 .join(' · ')}
             </div>
           </div>
+          {onPrint && (
+            <button
+              type="button"
+              className="action"
+              disabled={busyId === file.id}
+              onClick={() => onPrint(file)}
+            >
+              Печать
+            </button>
+          )}
           <button
             type="button"
             disabled={busyId === file.id}

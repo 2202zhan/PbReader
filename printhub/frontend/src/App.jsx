@@ -3,19 +3,19 @@ import { api, hasToken, setToken } from './api';
 import { initData, isTelegram, ready } from './telegram';
 import FileList from './FileList';
 import Upload from './Upload';
+import Orders from './Orders';
+import OrderScreen from './OrderScreen';
+import Admin from './Admin';
 import { filesWord, pagesWord } from './format';
-import { FolderIcon, PersonIcon, PrinterIcon } from './icons';
-
-const TABS = [
-  { key: 'home', Icon: PrinterIcon, title: 'Главная' },
-  { key: 'files', Icon: FolderIcon, title: 'Мои файлы' },
-  { key: 'profile', Icon: PersonIcon, title: 'Профиль' },
-];
+import { CogIcon, FolderIcon, PersonIcon, PrinterIcon, ReceiptIcon } from './icons';
 
 export default function App() {
   const [tab, setTab] = useState('home');
   const [profile, setProfile] = useState(null);
   const [files, setFiles] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [printers, setPrinters] = useState([]);
+  const [openOrder, setOpenOrder] = useState(null);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('starting');
   const [uploading, setUploading] = useState(false);
@@ -24,9 +24,16 @@ export default function App() {
   const [health, setHealth] = useState(null);
 
   const refresh = useCallback(async () => {
-    const [me, list] = await Promise.all([api.me(), api.files()]);
+    const [me, fileList, orderList, printerList] = await Promise.all([
+      api.me(),
+      api.files(),
+      api.orders(),
+      api.printers(),
+    ]);
     setProfile(me);
-    setFiles(list.files);
+    setFiles(fileList.files);
+    setOrders(orderList.orders);
+    setPrinters(printerList.printers);
   }, []);
 
   useEffect(() => {
@@ -41,7 +48,6 @@ export default function App() {
           if (isTelegram) {
             setToken((await api.loginTelegram(initData())).token);
           } else if (state.dev_login) {
-            // Вход без телеграма — только когда сервер сам его разрешил.
             setToken((await api.loginDev()).token);
           } else {
             setStatus('needs-telegram');
@@ -52,7 +58,6 @@ export default function App() {
         await refresh();
         setStatus('ready');
       } catch (exc) {
-        // Токен мог протухнуть за ночь — тогда пробуем войти заново, один раз.
         if (exc.status === 401 && isTelegram) {
           try {
             setToken((await api.loginTelegram(initData())).token);
@@ -80,12 +85,26 @@ export default function App() {
       setProfile((current) =>
         current ? { ...current, files_count: (current.files_count || 0) + 1 } : current,
       );
-      setTab('files');
+      await print(uploaded);
     } catch (exc) {
       setError(exc.message);
     } finally {
       setUploading(false);
       setProgress(0);
+    }
+  }
+
+  async function print(file) {
+    setError('');
+    try {
+      const order = await api.createOrder({
+        file_id: file.id,
+        printer_id: printers[0]?.id || null,
+      });
+      setOpenOrder(order);
+    } catch (exc) {
+      setError(exc.message);
+      setTab('files');
     }
   }
 
@@ -103,6 +122,12 @@ export default function App() {
     } finally {
       setBusyId(null);
     }
+  }
+
+  async function afterConfirm(order) {
+    setOpenOrder(null);
+    setTab('orders');
+    setOrders(await api.orders().then((data) => data.orders));
   }
 
   if (status === 'starting') {
@@ -125,92 +150,127 @@ export default function App() {
     );
   }
 
+  const tabs = [
+    { key: 'home', Icon: PrinterIcon, title: 'Главная' },
+    { key: 'files', Icon: FolderIcon, title: 'Файлы' },
+    { key: 'orders', Icon: ReceiptIcon, title: 'Заказы' },
+    { key: 'profile', Icon: PersonIcon, title: 'Профиль' },
+  ];
+  if (profile?.is_admin) tabs.push({ key: 'admin', Icon: CogIcon, title: 'Админка' });
+
   const totalPages = files.reduce((sum, file) => sum + (file.pages || 0), 0);
+  const waiting = orders.filter((order) => order.state === 'awaiting_payment').length;
 
   return (
     <div className="app">
       <div className="screen">
-        {error && <div className="notice error">{error}</div>}
-        {health?.dev_login && (
-          <div className="notice warn">
-            Режим разработки: вход без телеграма включён. На боевом сервере он невозможен.
-          </div>
-        )}
-
-        {tab === 'home' && (
+        {openOrder ? (
+          <OrderScreen
+            order={openOrder}
+            onChange={setOpenOrder}
+            onClose={() => setOpenOrder(null)}
+            onConfirmed={afterConfirm}
+          />
+        ) : (
           <>
-            <h1>Печать документов</h1>
-            <p className="hint">
-              Загрузите файл, выберите параметры и заберите распечатку у принтера.
-            </p>
-            <Upload onPick={pick} uploading={uploading} progress={progress} />
-            {files.length > 0 && (
+            {error && <div className="notice error">{error}</div>}
+            {health?.dev_login && (
+              <div className="notice warn">
+                Режим разработки: вход без телеграма включён. На боевом сервере он невозможен.
+              </div>
+            )}
+
+            {tab === 'home' && (
               <>
-                <h2>Последние файлы</h2>
-                <FileList files={files.slice(0, 3)} onDelete={remove} busyId={busyId} />
+                <h1>Печать документов</h1>
+                <p className="hint">
+                  Загрузите файл, выберите параметры и заберите распечатку у принтера.
+                </p>
+                <Upload onPick={pick} uploading={uploading} progress={progress} />
+                {files.length > 0 && (
+                  <>
+                    <h2>Последние файлы</h2>
+                    <FileList files={files.slice(0, 3)} onDelete={remove} onPrint={print}
+                              busyId={busyId} />
+                  </>
+                )}
               </>
             )}
-          </>
-        )}
 
-        {tab === 'files' && (
-          <>
-            <h1>Мои файлы</h1>
-            <p className="hint">
-              {files.length
-                ? `${filesWord(files.length)}${totalPages ? `, всего ${pagesWord(totalPages)}` : ''}`
-                : 'Загруженные документы появятся здесь'}
-            </p>
-            <Upload onPick={pick} uploading={uploading} progress={progress} />
-            <h2>Все файлы</h2>
-            <FileList files={files} onDelete={remove} busyId={busyId} />
-          </>
-        )}
+            {tab === 'files' && (
+              <>
+                <h1>Мои файлы</h1>
+                <p className="hint">
+                  {files.length
+                    ? `${filesWord(files.length)}${totalPages ? `, всего ${pagesWord(totalPages)}` : ''}`
+                    : 'Загруженные документы появятся здесь'}
+                </p>
+                <Upload onPick={pick} uploading={uploading} progress={progress} />
+                <h2>Все файлы</h2>
+                <FileList files={files} onDelete={remove} onPrint={print} busyId={busyId} />
+              </>
+            )}
 
-        {tab === 'profile' && (
-          <>
-            <h1>Профиль</h1>
-            <p className="hint">Данные берутся из телеграма — менять их здесь незачем.</p>
-            <div className="rows">
-              <div className="row">
-                <span>Имя</span>
-                <span>{[profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || '—'}</span>
-              </div>
-              <div className="row">
-                <span>Ник</span>
-                <span>{profile?.username ? `@${profile.username}` : '—'}</span>
-              </div>
-              <div className="row">
-                <span>Номер</span>
-                <span>{profile?.id}</span>
-              </div>
-              <div className="row">
-                <span>Файлов</span>
-                <span>{profile?.files_count ?? 0}</span>
-              </div>
-            </div>
+            {tab === 'orders' && (
+              <>
+                <h1>Заказы</h1>
+                <p className="hint">
+                  {waiting ? `${waiting} ждёт оплаты` : 'Здесь видно, что с вашими заказами'}
+                </p>
+                <Orders orders={orders} onOpen={(order) =>
+                  order.editable ? setOpenOrder(order) : null} />
+              </>
+            )}
 
-            <h2>Заказы</h2>
-            <div className="card hint" style={{ marginTop: 0 }}>
-              История заказов появится, когда заработают оплата и печать.
-            </div>
+            {tab === 'profile' && (
+              <>
+                <h1>Профиль</h1>
+                <p className="hint">Данные берутся из телеграма — менять их здесь незачем.</p>
+                <div className="rows">
+                  <div className="row">
+                    <span>Имя</span>
+                    <span>{[profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || '—'}</span>
+                  </div>
+                  <div className="row">
+                    <span>Ник</span>
+                    <span>{profile?.username ? `@${profile.username}` : '—'}</span>
+                  </div>
+                  <div className="row">
+                    <span>Номер</span>
+                    <span>{profile?.id}</span>
+                  </div>
+                  <div className="row">
+                    <span>Файлов</span>
+                    <span>{profile?.files_count ?? 0}</span>
+                  </div>
+                  <div className="row">
+                    <span>Заказов</span>
+                    <span>{orders.length}</span>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {tab === 'admin' && <Admin />}
           </>
         )}
       </div>
 
-      <nav className="tabs">
-        {TABS.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            className={tab === item.key ? 'active' : ''}
-            onClick={() => setTab(item.key)}
-          >
-            <span className="glyph"><item.Icon /></span>
-            {item.title}
-          </button>
-        ))}
-      </nav>
+      {!openOrder && (
+        <nav className="tabs">
+          {tabs.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={tab === item.key ? 'active' : ''}
+              onClick={() => setTab(item.key)}
+            >
+              <span className="glyph"><item.Icon /></span>
+              {item.title}
+            </button>
+          ))}
+        </nav>
+      )}
     </div>
   );
 }

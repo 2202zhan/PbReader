@@ -16,15 +16,15 @@ import uuid
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
-from .. import db, sessions, storage
+from .. import db, jobs, orders, sessions, storage
 from ..config import SESSION_TTL_SECONDS, Settings
 from ..models import File as FileRow
-from ..models import User, as_utc, now
+from ..models import Order, OrderState, Printer, TariffRow, User, as_utc, now
 from ..telegram.initdata import InitDataError, TelegramUser, validate
 
 logger = logging.getLogger("printhub")
@@ -42,6 +42,36 @@ class DevLogin(BaseModel):
     username: str = "tester"
 
 
+class NewOrder(BaseModel):
+    file_id: str
+    printer_id: str | None = None
+    options: dict = {}
+
+
+class OrderOptions(BaseModel):
+    options: dict = {}
+    printer_id: str | None = None
+
+
+class PrinterForm(BaseModel):
+    id: str | None = None
+    title: str = ""
+    location: str = ""
+    paper: str = "A4"
+    color_supported: bool = False
+    duplex_supported: bool = True
+    is_active: bool = True
+
+
+class TariffForm(BaseModel):
+    price_mono: int
+    price_color: int
+    heavy_ink_from: float = 0.30
+    heavy_extra_mono: int = 0
+    heavy_extra_color: int = 0
+    min_order: int = 0
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.load()
     settings.ensure_dirs()
@@ -49,6 +79,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="PrintHub", version="0.1.0")
     app.state.settings = settings
+    _bootstrap(settings)
 
     if settings.dev_login:
         logger.warning(
@@ -138,7 +169,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 .select_from(FileRow)
                 .where(FileRow.owner_id == user.id, FileRow.deleted.is_(False))
             )
-        return {**as_profile(user), "files_count": int(count or 0)}
+        return {
+            **as_profile(user),
+            "files_count": int(count or 0),
+            "is_admin": settings.is_admin(user.id),
+        }
 
     # ─── файлы ───
 
@@ -223,6 +258,259 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             session.add(stored)
         return {"deleted": file_id}
 
+    # ─── принтеры ───
+
+    @app.get("/api/printers")
+    def printers(user: User = Depends(current_user)):
+        with db.session_scope() as session:
+            rows = session.scalars(
+                select(Printer).where(Printer.is_active.is_(True)).order_by(Printer.title)
+            ).all()
+            tariffs = {row.id: orders.tariff_for(session, row.id) for row in rows}
+        return {
+            "printers": [
+                {
+                    **row.to_dict(),
+                    "price_mono": tariffs[row.id].price_mono,
+                    "price_color": tariffs[row.id].price_color,
+                    "currency": tariffs[row.id].currency,
+                }
+                for row in rows
+            ]
+        }
+
+    # ─── заказы ───
+
+    def _own_order(order_id: str, user: User, session) -> Order:
+        order = session.scalar(
+            select(Order).where(Order.id == order_id, Order.user_id == user.id)
+        )
+        if order is None:
+            raise HTTPException(404, "Заказ не найден")
+        return order
+
+    def _order_payload(session, order: Order) -> dict:
+        file_row = session.get(FileRow, order.file_id)
+        return order.to_dict(file_name=file_row.original_name if file_row else "")
+
+    @app.post("/api/orders")
+    def create_order(body: NewOrder, user: User = Depends(current_user)):
+        with db.session_scope() as session:
+            try:
+                order = orders.create(
+                    session, user.id, body.file_id, body.printer_id,
+                    body.options, settings.files_dir,
+                )
+            except orders.OrderProblem as exc:
+                raise HTTPException(404 if exc.reason == "not_found" else 409, str(exc)) from None
+            session.flush()
+            return _order_payload(session, order)
+
+    @app.get("/api/orders")
+    def list_orders(user: User = Depends(current_user)):
+        with db.session_scope() as session:
+            rows = session.scalars(
+                select(Order).where(Order.user_id == user.id).order_by(Order.created_at.desc())
+            ).all()
+            return {"orders": [_order_payload(session, row) for row in rows]}
+
+    @app.get("/api/orders/{order_id}")
+    def order_info(order_id: str, user: User = Depends(current_user)):
+        with db.session_scope() as session:
+            return _order_payload(session, _own_order(order_id, user, session))
+
+    @app.patch("/api/orders/{order_id}")
+    def update_order(order_id: str, body: OrderOptions, user: User = Depends(current_user)):
+        with db.session_scope() as session:
+            order = _own_order(order_id, user, session)
+            if order.state not in OrderState.EDITABLE:
+                # Подтверждённый заказ — это уже обязательство с зафиксированной
+                # ценой. Правка параметров задним числом её бы разошлась.
+                raise HTTPException(409, "Заказ уже подтверждён, параметры не меняются")
+            order.options = {**(order.options or {}), **body.options}
+            if body.printer_id is not None:
+                order.printer_id = body.printer_id
+            try:
+                orders.recalculate(session, order, settings.files_dir)
+            except orders.OrderProblem as exc:
+                raise HTTPException(409, str(exc)) from None
+            session.add(order)
+            session.flush()
+            return _order_payload(session, order)
+
+    @app.post("/api/orders/{order_id}/confirm")
+    def confirm_order(order_id: str, user: User = Depends(current_user)):
+        with db.session_scope() as session:
+            order = _own_order(order_id, user, session)
+            try:
+                orders.confirm(session, order, settings.files_dir)
+            except orders.OrderProblem as exc:
+                raise HTTPException(409, str(exc)) from None
+            session.add(order)
+            session.flush()
+            return _order_payload(session, order)
+
+    @app.delete("/api/orders/{order_id}")
+    def cancel_order(order_id: str, user: User = Depends(current_user)):
+        with db.session_scope() as session:
+            order = _own_order(order_id, user, session)
+            if order.state not in (OrderState.DRAFT, OrderState.AWAITING_PAYMENT):
+                raise HTTPException(409, "Этот заказ уже нельзя отменить")
+            order.state = OrderState.CANCELLED
+            session.add(order)
+        return {"cancelled": order_id}
+
+    @app.get("/api/orders/{order_id}/preview/{sheet}")
+    def order_preview(
+        order_id: str,
+        sheet: int,
+        side: str = "front",
+        width: int = 720,
+        user: User = Depends(current_user),
+    ):
+        """Картинка листа — то, что выйдет из принтера, а не то, как выглядит PDF."""
+        from pbreader.document import PdfDocument
+
+        # Ширина приходит из адреса, то есть снаружи. Без предела один запрос
+        # на 50 000 пикселей занял бы память и процессор сервера целиком.
+        width = max(120, min(int(width), 1600))
+        if side not in ("front", "back"):
+            raise HTTPException(400, "Сторона бывает front или back")
+
+        with db.session_scope() as session:
+            order = _own_order(order_id, user, session)
+            file_row = session.get(FileRow, order.file_id)
+            printer = session.get(Printer, order.printer_id) if order.printer_id else None
+            if file_row is None or file_row.deleted:
+                raise HTTPException(410, "Файл заказа удалён")
+            job = jobs.build_job(order.options or {}, printer)
+            device = jobs.device_for(job, printer)
+            path = settings.files_dir / file_row.stored_name
+
+        if not path.is_file():
+            raise HTTPException(410, "Файл заказа удалён")
+
+        try:
+            with PdfDocument(path) as document:
+                preview = jobs.render(document, job, device, sheet, side, width)
+        except IndexError as exc:
+            raise HTTPException(404, str(exc)) from None
+
+        return Response(
+            content=preview.png,
+            media_type="image/png",
+            headers={
+                # Лист зависит только от параметров заказа, а они меняются
+                # через PATCH — который отдаёт новый ответ. Держим недолго:
+                # достаточно, чтобы пролистывание не дёргало сервер.
+                "Cache-Control": "private, max-age=60",
+                "X-Sheet-Page": str(preview.page if preview.page is not None else ""),
+                "X-Sheet-Clipped": "1" if preview.ink_clipped else "0",
+            },
+        )
+
+    # ─── админка ───
+
+    def admin(user: User = Depends(current_user)) -> User:
+        if not settings.is_admin(user.id):
+            # 404, а не 403: существование панели незачем подтверждать.
+            raise HTTPException(404, "Not found")
+        return user
+
+    @app.get("/api/admin/printers")
+    def admin_printers(_: User = Depends(admin)):
+        with db.session_scope() as session:
+            rows = session.scalars(select(Printer).order_by(Printer.created_at)).all()
+            return {
+                "printers": [
+                    {**row.to_dict(), "tariff": orders.tariff_for(session, row.id).__dict__}
+                    for row in rows
+                ]
+            }
+
+    @app.post("/api/admin/printers")
+    def admin_create_printer(body: PrinterForm, _: User = Depends(admin)):
+        code = (body.id or "").strip()
+        if not code:
+            raise HTTPException(400, "Нужен код принтера — он же попадёт в ссылку с QR")
+        with db.session_scope() as session:
+            if session.get(Printer, code) is not None:
+                raise HTTPException(409, f"Принтер «{code}» уже заведён")
+            row = Printer(
+                id=code, title=body.title or code, location=body.location, paper=body.paper,
+                color_supported=body.color_supported, duplex_supported=body.duplex_supported,
+                is_active=body.is_active, created_at=now(),
+            )
+            session.add(row)
+            session.flush()
+            return row.to_dict()
+
+    @app.patch("/api/admin/printers/{printer_id}")
+    def admin_update_printer(printer_id: str, body: PrinterForm, _: User = Depends(admin)):
+        with db.session_scope() as session:
+            row = session.get(Printer, printer_id)
+            if row is None:
+                raise HTTPException(404, "Принтер не найден")
+            row.title = body.title or row.title
+            row.location = body.location
+            row.paper = body.paper
+            row.color_supported = body.color_supported
+            row.duplex_supported = body.duplex_supported
+            row.is_active = body.is_active
+            session.add(row)
+            session.flush()
+            return row.to_dict()
+
+    @app.get("/api/admin/tariffs")
+    def admin_tariffs(_: User = Depends(admin)):
+        with db.session_scope() as session:
+            rows = session.scalars(select(TariffRow)).all()
+            return {"tariffs": [row.to_dict() for row in rows]}
+
+    @app.put("/api/admin/tariffs/{scope}")
+    def admin_set_tariff(scope: str, body: TariffForm, user: User = Depends(admin)):
+        """scope — код принтера или «default» для общего прайса."""
+        if body.price_mono < 0 or body.price_color < 0 or body.min_order < 0:
+            raise HTTPException(400, "Цена не может быть отрицательной")
+        if not 0 < body.heavy_ink_from <= 1:
+            raise HTTPException(400, "Порог заполнения задаётся долей от 0 до 1")
+
+        printer_id = None if scope == "default" else scope
+        with db.session_scope() as session:
+            if printer_id and session.get(Printer, printer_id) is None:
+                raise HTTPException(404, "Принтер не найден")
+            row = session.scalar(
+                select(TariffRow).where(
+                    TariffRow.printer_id.is_(None) if printer_id is None
+                    else TariffRow.printer_id == printer_id
+                )
+            )
+            if row is None:
+                row = TariffRow(printer_id=printer_id)
+            row.price_mono = body.price_mono
+            row.price_color = body.price_color
+            row.heavy_ink_from = body.heavy_ink_from
+            row.heavy_extra_mono = body.heavy_extra_mono
+            row.heavy_extra_color = body.heavy_extra_color
+            row.min_order = body.min_order
+            row.updated_at = now()
+            row.updated_by = user.id
+            session.add(row)
+            session.flush()
+            return row.to_dict()
+
+    @app.get("/api/admin/orders")
+    def admin_orders(limit: int = 50, _: User = Depends(admin)):
+        with db.session_scope() as session:
+            rows = session.scalars(
+                select(Order).order_by(Order.created_at.desc()).limit(max(1, min(limit, 200)))
+            ).all()
+            return {
+                "orders": [
+                    {**_order_payload(session, row), "user_id": row.user_id} for row in rows
+                ]
+            }
+
     @app.get("/api/health")
     def health():
         return {
@@ -240,6 +528,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
 
     return app
+
+
+def _bootstrap(settings: Settings) -> None:
+    """То, без чего первый запуск не работает.
+
+    Общий тариф нужен всегда: без него первый же заказ считался бы по ценам,
+    зашитым в код, и админ не смог бы на это повлиять. Демонстрационный принтер
+    заводится только в разработке — выдуманная точка печати на боевом сервере
+    означала бы заказы в никуда.
+    """
+    with db.session_scope() as session:
+        if session.scalar(select(TariffRow).where(TariffRow.printer_id.is_(None))) is None:
+            session.add(TariffRow(printer_id=None, updated_at=now()))
+            logger.info("Заведён общий тариф по умолчанию — поправьте его в админке")
+
+        if settings.dev_login and session.scalar(select(Printer)) is None:
+            session.add(
+                Printer(
+                    id="test",
+                    title="Тестовый принтер",
+                    location="Для разработки",
+                    paper="A4",
+                    color_supported=True,
+                    duplex_supported=True,
+                    created_at=now(),
+                )
+            )
+            logger.info("Заведён тестовый принтер (только потому, что включён PRINTHUB_DEV_LOGIN)")
 
 
 def _detect(path: Path):

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 from dataclasses import dataclass, field
@@ -19,6 +20,27 @@ SESSION_TTL_SECONDS = 7 * 24 * 3600
 #: Предел размера загружаемого файла. Печать больших документов — обычное дело,
 #: но без предела один запрос способен занять весь диск.
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
+
+
+def _ids(name: str) -> frozenset[int]:
+    """Список номеров из переменной окружения.
+
+    Мусор молча пропускается, но не молча для журнала: опечатка в номере
+    админа иначе означала бы, что панель просто «не открывается», и искать
+    причину пришлось бы наугад.
+    """
+    result = set()
+    for part in os.environ.get(name, "").replace(";", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            result.add(int(part))
+        except ValueError:
+            logging.getLogger("printhub").warning(
+                "%s: «%s» — это не номер пользователя, пропускаю", name, part
+            )
+    return frozenset(result)
 
 
 def _flag(name: str, default: bool = False) -> bool:
@@ -39,6 +61,11 @@ class Settings:
     #: Вход без телеграма — чтобы разрабатывать в браузере, не поднимая туннель.
     dev_login: bool = False
     webapp_url: str = ""
+    #: Кто видит админку. Номера в телеграме, через запятую.
+    admin_ids: frozenset[int] = frozenset()
+
+    def is_admin(self, user_id: int) -> bool:
+        return user_id in self.admin_ids
 
     @property
     def is_production(self) -> bool:
@@ -62,6 +89,7 @@ class Settings:
             max_upload_bytes=int(os.environ.get("PRINTHUB_MAX_UPLOAD_BYTES", MAX_UPLOAD_BYTES)),
             dev_login=_flag("PRINTHUB_DEV_LOGIN"),
             webapp_url=os.environ.get("PRINTHUB_WEBAPP_URL", "").strip(),
+            admin_ids=_ids("PRINTHUB_ADMIN_IDS"),
         )
         settings.validate()
         return settings

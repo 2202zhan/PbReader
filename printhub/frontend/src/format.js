@@ -39,3 +39,18 @@ export function shortDate(iso) {
     ? date.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })
     : date.toLocaleDateString('ru', { day: 'numeric', month: 'short' });
 }
+
+export function sheetsWord(count) {
+  const tens = count % 100;
+  const ones = count % 10;
+  if (tens >= 11 && tens <= 14) return `${count} листов`;
+  if (ones === 1) return `${count} лист`;
+  if (ones >= 2 && ones <= 4) return `${count} листа`;
+  return `${count} листов`;
+}
+
+// Тенге целые — дробей в обороте нет, и сервер считает в целых.
+export function money(amount, currency = 'KZT') {
+  const value = new Intl.NumberFormat('ru-RU').format(amount || 0);
+  return currency === 'KZT' ? `${value} ₸` : `${value} ${currency}`;
+}

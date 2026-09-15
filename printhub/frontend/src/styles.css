@@ -134,3 +134,129 @@ h2 { font-size: 16px; margin: 20px 0 8px; }
 .row + .row { border-top: 1px solid color-mix(in srgb, var(--hint) 18%, transparent); }
 .row span:first-child { color: var(--hint); }
 .row span:last-child { text-align: right; overflow-wrap: anywhere; }
+
+/* ── экран заказа ── */
+
+.topbar {
+  display: flex; align-items: center; gap: 10px;
+  margin: -4px 0 12px;
+}
+.topbar .back {
+  border: 0; background: none; padding: 4px 0;
+  color: var(--link); font: inherit; cursor: pointer; white-space: nowrap;
+}
+.topbar-title {
+  font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Лист показывается на сером, как бумага на столе: белое поле листа иначе
+   сливается со светлой темой и границы страницы не видно. */
+.sheet {
+  display: grid; place-items: center;
+  background: var(--secondary-bg);
+  border-radius: var(--radius);
+  padding: 12px;
+  min-height: 240px;
+}
+.sheet img {
+  max-width: 100%; max-height: 52vh;
+  border-radius: 3px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, .18);
+}
+.sheet--loading { background: var(--secondary-bg); }
+.sheet--error { color: var(--danger); font-size: 13.5px; text-align: center; padding: 24px; }
+
+.sheet-nav {
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  padding: 10px 0 2px; color: var(--hint); font-size: 13.5px;
+}
+.sheet-nav button {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 0; background: var(--bg); color: var(--text);
+  font-size: 18px; line-height: 1; cursor: pointer;
+}
+.sheet-nav button:disabled { opacity: .35; cursor: default; }
+
+.segmented {
+  display: flex; gap: 4px;
+  background: var(--secondary-bg);
+  border-radius: 10px; padding: 3px;
+}
+.segmented.wrap { flex-wrap: wrap; }
+.segmented button {
+  flex: 1; min-width: 74px;
+  border: 0; border-radius: 8px; background: none;
+  padding: 8px 10px; font: inherit; font-size: 14px;
+  color: var(--hint); cursor: pointer;
+}
+.segmented button.on { background: var(--bg); color: var(--text); font-weight: 500; }
+.segmented button:disabled { opacity: .6; cursor: default; }
+
+.field {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  background: var(--bg); border-radius: var(--radius);
+  padding: 11px 14px; margin-bottom: 8px;
+}
+.field > label { flex: 0 0 auto; display: flex; flex-direction: column; }
+.field label em { font-style: normal; color: var(--hint); font-size: 11.5px; }
+.field input, .field select {
+  flex: 1; min-width: 0; max-width: 55%;
+  border: 0; background: var(--secondary-bg); border-radius: 8px;
+  padding: 8px 10px; font: inherit; color: var(--text); text-align: right;
+}
+.field .segmented { flex: 1; max-width: 62%; }
+.card .field { background: var(--secondary-bg); }
+.card .field input { background: var(--bg); }
+.card > .primary { margin-top: 6px; }
+
+.stepper { display: flex; align-items: center; gap: 4px; }
+.stepper span { min-width: 34px; text-align: center; font-variant-numeric: tabular-nums; }
+.stepper button {
+  width: 32px; height: 32px; border: 0; border-radius: 8px;
+  background: var(--secondary-bg); color: var(--text);
+  font-size: 17px; line-height: 1; cursor: pointer;
+}
+.stepper button:disabled { opacity: .4; cursor: default; }
+
+.row.total { font-weight: 600; }
+.row.total span:first-child { color: var(--text); }
+
+.hint.small { font-size: 12.5px; margin: 8px 0 14px; }
+.hint.center { text-align: center; }
+
+.notice.ok { background: color-mix(in srgb, #3aa675 16%, transparent); }
+
+.file.as-button {
+  width: 100%; border: 0; text-align: left; font: inherit; color: inherit; cursor: pointer;
+}
+.file .action {
+  border: 0; border-radius: 8px; padding: 7px 12px;
+  background: var(--secondary-bg); color: var(--link);
+  font: inherit; font-size: 13.5px; cursor: pointer;
+}
+.file .amount { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.tag { font-size: 12px; }
+.tag.ok { color: #2f9e6b; }
+.tag.warn { color: #c98a1e; }
+.tag.bad { color: var(--danger); }
+.tag.muted { color: var(--hint); }
+
+/* Действия заказа держатся у нижнего края: сумма и согласие должны быть видны
+   всегда, а не после прокрутки мимо предпросмотра. */
+.order-actions {
+  position: sticky;
+  bottom: 0;
+  margin: 16px -16px calc(-16px - env(safe-area-inset-bottom, 0px));
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  background: var(--bg);
+  border-top: 1px solid color-mix(in srgb, var(--hint) 22%, transparent);
+}
+.order-total {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 10px;
+}
+.order-total span { color: var(--hint); }
+.order-total strong { font-size: 19px; font-variant-numeric: tabular-nums; }
+.order-actions .hint.small { margin: 8px 0 0; }

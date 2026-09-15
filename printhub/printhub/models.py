@@ -4,7 +4,17 @@ from __future__ import annotations
 
 import datetime as dt
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -80,3 +90,146 @@ def as_utc(moment: dt.datetime | None) -> str | None:
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=dt.timezone.utc)
     return moment.astimezone(dt.timezone.utc).isoformat()
+
+
+class Printer(Base):
+    """Точка печати.
+
+    Пока принтера нет, профиль заводится вручную из админки, а геометрия листа
+    берётся типовая и помечается как неизмеренная. Когда у аппарата появится
+    агент (фаза 5), он пришлёт настоящие поля и возможности — и предпросмотр
+    станет точным без единой правки в интерфейсе.
+    """
+
+    __tablename__ = "printers"
+
+    #: Короткий код, он же то, что попадёт в наклейку с QR: t.me/bot?startapp=<id>
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    title: Mapped[str] = mapped_column(String(128), default="")
+    location: Mapped[str] = mapped_column(String(255), default="")
+    paper: Mapped[str] = mapped_column(String(32), default="A4")
+    color_supported: Mapped[bool] = mapped_column(Boolean, default=False)
+    duplex_supported: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    #: Настоящие поля печати, снятые с драйвера. Пока их нет — None, и
+    #: интерфейс обязан сказать, что поля пока приблизительные.
+    geometry: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+    @property
+    def margins_measured(self) -> bool:
+        return bool(self.geometry)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "location": self.location,
+            "paper": self.paper,
+            "color_supported": self.color_supported,
+            "duplex_supported": self.duplex_supported,
+            "is_active": self.is_active,
+            "margins_measured": self.margins_measured,
+        }
+
+
+class TariffRow(Base):
+    """Прайс. Меняется из админки, в коде цен нет.
+
+    Тариф привязан к принтеру, а строка с printer_id = None — общая: точка без
+    своего прайса работает по ней. Так новый аппарат начинает продавать сразу,
+    а не после того, как кто-то вспомнит завести ему цены.
+    """
+
+    __tablename__ = "tariffs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    printer_id: Mapped[str | None] = mapped_column(
+        ForeignKey("printers.id"), nullable=True, unique=True
+    )
+    price_mono: Mapped[int] = mapped_column(Integer, default=30)
+    price_color: Mapped[int] = mapped_column(Integer, default=150)
+    heavy_ink_from: Mapped[float] = mapped_column(Float, default=0.30)
+    heavy_extra_mono: Mapped[int] = mapped_column(Integer, default=30)
+    heavy_extra_color: Mapped[int] = mapped_column(Integer, default=150)
+    min_order: Mapped[int] = mapped_column(Integer, default=0)
+    currency: Mapped[str] = mapped_column(String(8), default="KZT")
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "printer_id": self.printer_id,
+            "price_mono": self.price_mono,
+            "price_color": self.price_color,
+            "heavy_ink_from": self.heavy_ink_from,
+            "heavy_extra_mono": self.heavy_extra_mono,
+            "heavy_extra_color": self.heavy_extra_color,
+            "min_order": self.min_order,
+            "currency": self.currency,
+            "updated_at": as_utc(self.updated_at),
+        }
+
+
+class OrderState:
+    """Состояния заказа.
+
+    Черновик правится сколько угодно; всё остальное — уже обязательства, и
+    параметры там заморожены. Оплата, очередь и печать появятся в фазах 4 и 5,
+    но названия заведены сейчас, чтобы переход не менял смысл существующих.
+    """
+
+    DRAFT = "draft"
+    AWAITING_PAYMENT = "awaiting_payment"
+    PAID = "paid"
+    PRINTING = "printing"
+    DONE = "done"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+    #: Состояния, в которых заказ ещё можно править.
+    EDITABLE = {DRAFT}
+
+
+class Order(Base):
+    __tablename__ = "orders"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    file_id: Mapped[str] = mapped_column(ForeignKey("files.id"), index=True)
+    printer_id: Mapped[str | None] = mapped_column(ForeignKey("printers.id"), nullable=True)
+    state: Mapped[str] = mapped_column(String(32), default=OrderState.DRAFT, index=True)
+
+    #: Параметры печати в виде, который понимает PbReader.
+    options: Mapped[dict] = mapped_column(JSON, default=dict)
+    #: Что из этих параметров вышло: листы, стороны, заполнение. Снимок, а не
+    #: ссылка на расчёт: файл могут удалить, а заказ обязан помнить, за что
+    #: с человека взяли деньги.
+    plan: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    #: Сумма и её расшифровка на момент подтверждения — по тому тарифу, что
+    #: действовал тогда. Смена прайса не должна менять цену принятого заказа.
+    price: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    amount: Mapped[int] = mapped_column(Integer, default=0)
+    currency: Mapped[str] = mapped_column(String(8), default="KZT")
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+    confirmed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    file: Mapped[File] = relationship()
+
+    def to_dict(self, file_name: str = "") -> dict:
+        return {
+            "id": self.id,
+            "state": self.state,
+            "file_id": self.file_id,
+            "file_name": file_name,
+            "printer_id": self.printer_id,
+            "options": self.options or {},
+            "plan": self.plan,
+            "price": self.price,
+            "amount": self.amount,
+            "currency": self.currency,
+            "editable": self.state in OrderState.EDITABLE,
+            "created_at": as_utc(self.created_at),
+        }

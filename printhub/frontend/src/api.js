@@ -61,6 +61,39 @@ export const api = {
   me: () => request('/me'),
   health: () => request('/health'),
   files: () => request('/files'),
+  printers: () => request('/printers'),
+
+  orders: () => request('/orders'),
+  order: (id) => request(`/orders/${id}`),
+  createOrder: (body) => request('/orders', { method: 'POST', json: body }),
+  updateOrder: (id, body) => request(`/orders/${id}`, { method: 'PATCH', json: body }),
+  confirmOrder: (id) => request(`/orders/${id}/confirm`, { method: 'POST' }),
+  cancelOrder: (id) => request(`/orders/${id}`, { method: 'DELETE' }),
+
+  adminPrinters: () => request('/admin/printers'),
+  adminCreatePrinter: (body) => request('/admin/printers', { method: 'POST', json: body }),
+  adminUpdatePrinter: (id, body) =>
+    request(`/admin/printers/${id}`, { method: 'PATCH', json: body }),
+  adminTariffs: () => request('/admin/tariffs'),
+  adminSetTariff: (scope, body) =>
+    request(`/admin/tariffs/${scope}`, { method: 'PUT', json: body }),
+  adminOrders: () => request('/admin/orders'),
+
+  // Предпросмотр тянется запросом, а не подставляется в <img src>.
+  //
+  // У <img> нет заголовков, поэтому пришлось бы класть токен сессии в адрес
+  // картинки — а адреса попадают в журналы сервера, в историю браузера и в
+  // Referer. Токен оттуда достать проще, чем кажется, а предпросмотр — это
+  // содержимое чужого документа.
+  async previewBlob(orderId, sheet, side, width, signal) {
+    const query = new URLSearchParams({ side, width: String(width) });
+    const response = await fetch(`/api/orders/${orderId}/preview/${sheet}?${query}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal,
+    });
+    if (!response.ok) throw new ApiError(`Лист не отрисовался (${response.status})`, response.status);
+    return URL.createObjectURL(await response.blob());
+  },
   deleteFile: (id) => request(`/files/${id}`, { method: 'DELETE' }),
   upload(file, onProgress) {
     // fetch не умеет сообщать о ходе отправки, а файл на 40 МБ по мобильной

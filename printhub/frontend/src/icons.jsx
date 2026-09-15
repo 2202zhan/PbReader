@@ -52,3 +52,21 @@ export function DocumentIcon() {
     </svg>
   );
 }
+
+export function ReceiptIcon() {
+  return (
+    <svg {...common}>
+      <path d="M6 3h12v18l-3-1.8-3 1.8-3-1.8L6 21z" />
+      <path d="M9.5 8.5h5M9.5 12.5h5" />
+    </svg>
+  );
+}
+
+export function CogIcon() {
+  return (
+    <svg {...common}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 3v2.2M12 18.8V21M21 12h-2.2M5.2 12H3M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6M18.4 18.4l-1.6-1.6M7.2 7.2 5.6 5.6" />
+    </svg>
+  );
+}
