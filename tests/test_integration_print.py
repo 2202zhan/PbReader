@@ -31,16 +31,25 @@ def setup_logging(path, fmt, stream=None):
 
 LOG_LINE = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d,\d+ - (INFO|WARNING|ERROR|DEBUG) - ")
 
+# Имя, которого нет ни в одной очереди печати: на Windows поиск принтера
+# закончится отказом, на Linux до него вообще не дойдёт.
+ABSENT_PRINTER = "PbReader-нет-такого-принтера"
+
 
 @pytest.fixture
 def kiosk(tmp_path, make_pdf):
     """Раскладка киоска: config.py, log_rotation.py и новый print.py рядом."""
     from pbreader.paper import A4
 
+    # Принтер назван так, чтобы его заведомо не было ни на одной машине.
+    # Тесты запускают печать по-настоящему, и стой здесь имя боевого аппарата
+    # («HP LaserJet M507»), прогон pytest на киоске отправил бы на него
+    # несколько заданий. Проверяется всё до передачи драйверу, а дальше путь
+    # обязан обрываться — и обрывается одинаково на любой системе.
     (tmp_path / "config.py").write_text(
         f'output_dirs = r"{tmp_path / "output"}"\n'
         f'input_dirs = r"{tmp_path / "input"}"\n'
-        'name_printer = "HP LaserJet M507"\n'
+        f'name_printer = "{ABSENT_PRINTER}"\n'
         'PRINTER_IP = "192.168.0.2"\n'
         'SUMATRA_PATH = r"C:\\\\SumatraPDF\\\\SumatraPDF.exe"\n'
         'FOXIT_PATH = r"C:\\\\Foxit\\\\FoxitPDFReader.exe"\n'
@@ -75,8 +84,13 @@ def result_line(output: str):
 
 class TestProtocol:
     def test_old_json_is_accepted_and_reaches_printing(self, kiosk):
-        """Дальше печати на Linux пути нет — но всё до неё должно пройти:
-        разбор старых ключей, скачивание, открытие документа, задание."""
+        """Всё до передачи драйверу должно пройти: разбор старых ключей,
+        скачивание, открытие документа, сборка задания.
+
+        Обрывается путь в разных местах — на Linux печати нет вовсе, на Windows
+        нет принтера с таким именем, — поэтому судим не по тексту отказа, а по
+        тому, докуда дошли: «Using PDF» пишется прямо перед печатью.
+        """
         directory, document = kiosk
         done = run(directory, {
             "file_url": str(document), "copy_count": 2, "is_color": False,
@@ -85,7 +99,15 @@ class TestProtocol:
             "device_token": "тестовый", "telegram_file_id": "x",
             "document_status": "ok", "print_method_status": "pending",
         })
-        assert "только в Windows" in done.stdout, "остановились не на печати, а раньше"
+        assert "Using PDF" in done.stdout, "остановились не на печати, а раньше"
+
+        # Старые ключи разобраны — задание собрано из них, а не из умолчаний.
+        assert "Copies: 2" in done.stdout
+        assert "Pages: 1-2" in done.stdout
+        assert "Tray: 257" in done.stdout
+        assert "One-sided: False" in done.stdout
+
+        assert result_line(done.stdout)["reason"] == "print_failed"
 
     def test_stdout_carries_only_the_log(self, kiosk):
         """В stdout идёт поток журнала, и посторонняя строка испортила бы то,
@@ -138,7 +160,7 @@ class TestSettings:
     def test_printer_and_work_dir_come_from_config(self, kiosk):
         directory, document = kiosk
         done = run(directory, {"file_url": str(document)})
-        assert "HP LaserJet M507" in done.stdout
+        assert ABSENT_PRINTER in done.stdout
         assert str(directory / "output") in done.stdout
 
     def test_target_paper_size_is_honoured(self, kiosk):
@@ -243,9 +265,18 @@ class TestInstallInstructions:
                     )
 
     def test_the_error_names_a_command_that_works(self, kiosk):
-        """Библиотеки нет — сообщение обязано сказать, чем это лечится."""
+        """Библиотеки нет — сообщение обязано сказать, чем это лечится.
+
+        Убрать PbReader с пути мало: на машине разработчика он стоит в
+        site-packages и всё равно найдётся. Поэтому рядом со скриптом кладём
+        заглушку — print.py добавляет свой каталог в начало sys.path, так что
+        импорт наткнётся на неё и уйдёт в ту самую ветку с советом.
+        """
         directory, document = kiosk
-        done = run(directory, {"file_url": str(document)}, {"PYTHONPATH": str(directory)})
+        (directory / "pbreader.py").write_text(
+            'raise ImportError("нет такого пакета")\n', encoding="utf-8"
+        )
+        done = run(directory, {"file_url": str(document)})
         assert done.returncode == 1
         assert "pip install ." in done.stdout
         assert str(sys.executable) in done.stdout or "не установлен" in done.stdout
