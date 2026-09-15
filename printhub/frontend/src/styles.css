@@ -1,17 +1,41 @@
-/* Цвета берутся из темы телеграма: приложение должно выглядеть частью клиента,
-   а не чужой страницей внутри него. На настольном браузере переменных нет —
-   поэтому у каждой стоит запасное значение. */
+/* Цвета фона и текста берём из темы телеграма — приложение должно выглядеть
+   частью клиента, а не чужой страницей внутри него. А вот акцент свой,
+   индиговый: по нему узнают нас, и он не меняется от того, какую тему
+   человек включил. Запасные значения нужны для обычного браузера, где
+   переменных телеграма нет вовсе. */
 :root {
+  --ink: #4338ca;
+  --ink-dim: #6366f1;
+  --ink-soft: #eef0fd;
+  --good: #0d9488;
+  --good-soft: #dcf5f1;
+  --warn: #b45309;
+  --warn-soft: #fdf0dc;
+
   --bg: var(--tg-theme-bg-color, #ffffff);
-  --secondary-bg: var(--tg-theme-secondary-bg-color, #f2f3f5);
-  --text: var(--tg-theme-text-color, #1a1a1a);
-  --hint: var(--tg-theme-hint-color, #8b8f96);
-  --link: var(--tg-theme-link-color, #2f80ed);
-  --button: var(--tg-theme-button-color, #2f80ed);
-  --button-text: var(--tg-theme-button-text-color, #ffffff);
-  --danger: #e04a3f;
-  --radius: 14px;
+  --secondary-bg: var(--tg-theme-secondary-bg-color, #f1f2f6);
+  --text: var(--tg-theme-text-color, #14161c);
+  --hint: var(--tg-theme-hint-color, #82868f);
+  --link: var(--ink);
+  --button: var(--ink);
+  --button-text: #ffffff;
+  --danger: #d4483b;
+  --radius: 16px;
   color-scheme: light dark;
+}
+
+/* В тёмной теме индиго на тёмном фоне читается плохо — берём светлее. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #8b87f5;
+    --ink-dim: #a5a1f8;
+    --ink-soft: #23243a;
+    --good: #2dd4bf;
+    --good-soft: #10312e;
+    --warn: #f0b429;
+    --warn-soft: #33270f;
+    --button-text: #14161c;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -45,6 +69,11 @@ body {
   display: flex;
   flex-direction: column;
 }
+
+/* Колонка из flex-элементов по умолчанию сжимает их до min-height, а
+   содержимое при этом не сжимается и вылезает на соседей: предпросмотр листа
+   наезжал на подпись под ним. Ничему в этой колонке сжиматься не нужно. */
+.screen > * { flex-shrink: 0; }
 
 h1 { font-size: 21px; margin: 4px 0 2px; }
 h2 { font-size: 16px; margin: 20px 0 8px; }
@@ -162,10 +191,10 @@ h2 { font-size: 16px; margin: 20px 0 8px; }
   background: var(--secondary-bg);
   border-radius: var(--radius);
   padding: 12px;
-  min-height: 240px;
+  min-height: 200px;
 }
 .sheet img {
-  max-width: 100%; max-height: 52vh;
+  max-width: 100%; max-height: 38vh;
   border-radius: 3px;
   box-shadow: 0 1px 6px rgba(0, 0, 0, .18);
 }
@@ -281,11 +310,13 @@ h2 { font-size: 16px; margin: 20px 0 8px; }
 
 .secondary {
   width: 100%; margin-top: 8px;
-  border: 0; border-radius: 10px;
-  background: var(--secondary-bg); color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--hint) 30%, transparent);
+  border-radius: 10px;
+  background: var(--bg); color: var(--text);
   padding: 13px; font: inherit; font-size: 15px; cursor: pointer;
 }
 .secondary:disabled { opacity: .55; cursor: default; }
+.secondary.compact { width: auto; margin: 0; padding: 8px 14px; font-size: 13.5px; }
 
 .link-button {
   border: 0; background: none; color: var(--link);
@@ -297,7 +328,147 @@ h2 { font-size: 16px; margin: 20px 0 8px; }
   width: 64px; height: 64px; margin: 0 auto 18px;
   display: grid; place-items: center;
   border-radius: 50%;
-  background: color-mix(in srgb, #3aa675 18%, transparent);
-  color: #2f9e6b; font-size: 30px; line-height: 1;
+  background: var(--ink-soft); color: var(--ink);
+  font-size: 30px; line-height: 1;
 }
+.done-mark.ok { background: var(--good-soft); color: var(--good); }
 .done h1 { margin-bottom: 6px; }
+
+/* ── мастер заказа ── */
+
+.wizard-head {
+  display: flex; align-items: center; gap: 10px;
+  margin: -4px 0 10px;
+}
+.wizard-head .back {
+  width: 34px; height: 34px; flex: 0 0 34px;
+  border: 0; border-radius: 50%; background: var(--secondary-bg);
+  color: var(--text); font-size: 17px; line-height: 1; cursor: pointer;
+}
+.wizard-head h1 { font-size: 18px; margin: 0; }
+
+/* Полоска шагов: человек должен видеть, сколько осталось, а не гадать. */
+.steps { display: flex; gap: 5px; margin-bottom: 14px; }
+.steps i {
+  flex: 1; height: 3px; border-radius: 2px;
+  background: color-mix(in srgb, var(--hint) 28%, transparent);
+}
+.steps i.passed { background: var(--ink); }
+
+.place {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--ink-soft); border-radius: 12px;
+  padding: 10px 12px; margin-bottom: 12px; font-size: 13.5px;
+}
+.place .dot {
+  width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--ink);
+}
+.place .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.place button {
+  border: 1px solid var(--ink); border-radius: 8px; background: none;
+  color: var(--ink); font: inherit; font-size: 12.5px; padding: 5px 10px; cursor: pointer;
+}
+
+/* Выбор из двух: не сегмент-переключатель, а две карточки — на них помещается
+   цена и причина, по которой вариант недоступен. */
+.choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.choice {
+  display: flex; align-items: center; gap: 10px; text-align: left;
+  border: 1.5px solid transparent; border-radius: 14px;
+  background: var(--bg); padding: 12px; font: inherit; color: var(--text);
+  cursor: pointer;
+}
+.choice > span { min-width: 0; }
+.choice .mark {
+  width: 20px; height: 20px; flex: 0 0 20px; border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--hint) 50%, transparent);
+}
+.choice.on { border-color: var(--ink); background: var(--ink-soft); }
+.choice.on .mark { border-color: var(--ink); background: var(--ink); box-shadow: inset 0 0 0 3.5px var(--bg); }
+/* Блочными эти строки должны быть явно: по умолчанию span строчный, и
+   название с ценой слипались в «Чёрно-белая30 ₸ за страницу». */
+.choice .title { display: block; font-weight: 600; font-size: 14.5px; }
+.choice .sub { display: block; color: var(--hint); font-size: 12px; margin-top: 2px; }
+.choice .sub.plus { color: var(--good); }
+.choice:disabled { cursor: default; opacity: .55; }
+.choice:disabled .title { font-weight: 500; }
+
+.group-label {
+  display: flex; justify-content: space-between; align-items: baseline;
+  color: var(--hint); font-size: 11.5px; letter-spacing: .4px; text-transform: uppercase;
+  margin: 16px 2px 8px;
+}
+
+/* ── выбор страниц ── */
+
+.pages {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  margin-bottom: 4px;
+}
+.page-card {
+  position: relative; border: 0; padding: 0; background: none; cursor: pointer;
+  border-radius: 10px; overflow: hidden; line-height: 0;
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--hint) 30%, transparent);
+}
+.page-card.on { box-shadow: 0 0 0 2px var(--ink); }
+.page-card img { width: 100%; display: block; background: var(--bg); aspect-ratio: 1 / 1.414; object-fit: contain; }
+.page-card .skeleton { width: 100%; aspect-ratio: 1 / 1.414; background: var(--secondary-bg); }
+.page-card .tick {
+  position: absolute; top: 5px; right: 5px;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--bg); color: transparent;
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--hint) 45%, transparent);
+  font-size: 12px; line-height: 20px; text-align: center;
+}
+.page-card.on .tick { background: var(--ink); color: #fff; box-shadow: none; }
+.page-card .number {
+  position: absolute; left: 5px; bottom: 5px;
+  background: color-mix(in srgb, var(--text) 55%, transparent);
+  color: var(--bg); border-radius: 6px;
+  font-size: 10.5px; line-height: 1; padding: 3px 5px;
+}
+
+.text-button {
+  border: 0; background: none; color: var(--ink);
+  font: inherit; font-size: 13px; cursor: pointer; padding: 0;
+}
+
+/* ── чек ── */
+
+.receipt { background: var(--bg); border-radius: var(--radius); padding: 4px 16px; }
+.receipt .line {
+  display: flex; justify-content: space-between; gap: 12px; padding: 11px 0;
+}
+.receipt .line + .line { border-top: 1px solid color-mix(in srgb, var(--hint) 16%, transparent); }
+.receipt .line .what { min-width: 0; }
+.receipt .line .what b { font-weight: 500; }
+.receipt .line .what span { display: block; color: var(--hint); font-size: 12px; margin-top: 2px; }
+.receipt .line .sum { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.receipt .line.total { font-weight: 600; font-size: 16px; }
+.receipt .line.off .sum { color: var(--good); }
+
+.callout {
+  background: var(--warn-soft); color: var(--warn);
+  border-radius: 12px; padding: 12px 14px; font-size: 13px; margin: 12px 0;
+}
+.callout.calm { background: var(--ink-soft); color: var(--ink); }
+
+/* ── ожидание оплаты ── */
+
+.waiting { text-align: center; padding: 16px 0 4px; }
+.dial { width: 92px; height: 92px; margin: 0 auto 16px; position: relative; }
+.dial svg { transform: rotate(-90deg); }
+.dial span {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 19px; font-variant-numeric: tabular-nums;
+}
+.how { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 16px 0; }
+.how div {
+  background: var(--bg); border-radius: 12px; padding: 12px 8px;
+  font-size: 11.5px; color: var(--hint); text-align: center;
+}
+.how b {
+  display: block; width: 20px; height: 20px; margin: 0 auto 7px;
+  border-radius: 50%; background: var(--ink); color: var(--button-text);
+  font-size: 11px; line-height: 20px;
+}

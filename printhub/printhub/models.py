@@ -149,6 +149,7 @@ class TariffRow(Base):
     )
     price_mono: Mapped[int] = mapped_column(Integer, default=30)
     price_color: Mapped[int] = mapped_column(Integer, default=150)
+    duplex_discount: Mapped[int] = mapped_column(Integer, default=0)
     heavy_ink_from: Mapped[float] = mapped_column(Float, default=0.30)
     heavy_extra_mono: Mapped[int] = mapped_column(Integer, default=30)
     heavy_extra_color: Mapped[int] = mapped_column(Integer, default=150)
@@ -162,6 +163,7 @@ class TariffRow(Base):
             "printer_id": self.printer_id,
             "price_mono": self.price_mono,
             "price_color": self.price_color,
+            "duplex_discount": self.duplex_discount,
             "heavy_ink_from": self.heavy_ink_from,
             "heavy_extra_mono": self.heavy_extra_mono,
             "heavy_extra_color": self.heavy_extra_color,
@@ -182,6 +184,8 @@ class OrderState:
     DRAFT = "draft"
     AWAITING_PAYMENT = "awaiting_payment"
     PAID = "paid"
+    #: Человек у аппарата и нажал «печатать». Задание ждёт агента.
+    QUEUED = "queued"
     PRINTING = "printing"
     DONE = "done"
     FAILED = "failed"

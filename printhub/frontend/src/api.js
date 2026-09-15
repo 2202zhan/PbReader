@@ -73,6 +73,7 @@ export const api = {
   // Оплата понарошку: сервер принимает это только в режиме разработки.
   devPay: (externalId, result) =>
     request(`/payments/dev/${externalId}/${result}`, { method: 'POST' }),
+  release: (id) => request(`/orders/${id}/release`, { method: 'POST' }),
   cancelOrder: (id) => request(`/orders/${id}`, { method: 'DELETE' }),
 
   adminPrinters: () => request('/admin/printers'),
@@ -83,6 +84,15 @@ export const api = {
   adminSetTariff: (scope, body) =>
     request(`/admin/tariffs/${scope}`, { method: 'PUT', json: body }),
   adminOrders: () => request('/admin/orders'),
+
+  async pageThumb(orderId, page, signal) {
+    const response = await fetch(`/api/orders/${orderId}/pages/${page}?width=240`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal,
+    });
+    if (!response.ok) throw new ApiError(`Страница не отрисовалась`, response.status);
+    return URL.createObjectURL(await response.blob());
+  },
 
   // Предпросмотр тянется запросом, а не подставляется в <img src>.
   //

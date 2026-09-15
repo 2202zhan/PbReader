@@ -5,6 +5,7 @@ import { money, shortDate } from './format';
 const EMPTY_TARIFF = {
   price_mono: 30,
   price_color: 150,
+  duplex_discount: 0,
   heavy_ink_from: 0.3,
   heavy_extra_mono: 30,
   heavy_extra_color: 150,
@@ -57,6 +58,7 @@ export default function Admin() {
       await api.adminSetTariff(scope, {
         price_mono: Number(form.price_mono),
         price_color: Number(form.price_color),
+        duplex_discount: Number(form.duplex_discount),
         heavy_ink_from: Number(form.heavy_ink_from),
         heavy_extra_mono: Number(form.heavy_extra_mono),
         heavy_extra_color: Number(form.heavy_extra_color),
@@ -120,6 +122,7 @@ export default function Admin() {
       <form onSubmit={saveTariff} className="card">
         {field('price_mono', 'Ч/б, ₸ за сторону')}
         {field('price_color', 'Цветная, ₸ за сторону')}
+        {field('duplex_discount', 'Скидка за 2 стороны, %', 'видна на кнопке выбора')}
         {field('heavy_ink_from', 'Порог заливки', 'доля, 0.3 = 30 %')}
         {field('heavy_extra_mono', 'Надбавка ч/б, ₸')}
         {field('heavy_extra_color', 'Надбавка цветная, ₸')}
@@ -129,8 +132,10 @@ export default function Admin() {
 
       <p className="hint small">
         Считается за запечатанную сторону, а не за лист: двусторонняя печать тратит
-        вдвое больше тонера при той же бумаге. Надбавка берётся со страниц, залитых
-        сильнее порога, — это защита от «распечатаю чёрный квадрат».
+        вдвое больше тонера при той же бумаге. Скидка за две стороны — про бумагу,
+        её уходит вдвое меньше; на последнюю нечётную страницу она не даётся, там
+        экономии нет. Надбавка берётся со страниц, залитых сильнее порога, — это
+        защита от «распечатаю чёрный квадрат».
       </p>
 
       <h2>Точки печати</h2>

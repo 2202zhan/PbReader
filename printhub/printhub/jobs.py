@@ -126,6 +126,9 @@ class Plan:
     #: Заполнение каждой ЗАПЕЧАТАННОЙ стороны. Чистый оборот сюда не попадает:
     #: он не печатается, и брать за него деньги нельзя.
     side_coverages: list[float]
+    #: Сколько сторон напечатано на листах, занятых с обеих сторон, — только
+    #: они экономят бумагу и только на них даётся скидка за дуплекс.
+    duplex_sides: int
     description: dict[str, Any]
 
     @property
@@ -136,6 +139,7 @@ class Plan:
         description = dict(self.description)
         description["sheet_count"] = self.sheet_count
         description["printed_sides"] = self.printed_sides
+        description["duplex_sides"] = self.duplex_sides
         description["ink"] = {
             "average_percent": round(
                 100 * sum(self.side_coverages) / len(self.side_coverages), 1
@@ -155,15 +159,21 @@ def analyse(document: PdfDocument, job: PrintJob, device: DeviceGeometry) -> Pla
     average = coverages.get("__average__", 0.0)
 
     side_coverages: list[float] = []
+    duplex_sides = 0
     for sheet in sheets:
-        for side in (sheet.front, sheet.back):
-            if side is None or side.page is None:
-                continue
+        printed = [
+            side for side in (sheet.front, sheet.back)
+            if side is not None and side.page is not None
+        ]
+        for side in printed:
             side_coverages.append(coverages.get(side.page, average))
+        if len(printed) == 2:
+            duplex_sides += 2
 
     return Plan(
         sheet_count=len(sheets),
         side_coverages=side_coverages,
+        duplex_sides=duplex_sides,
         description=describe_job(document, job, device),
     )
 

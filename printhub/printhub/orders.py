@@ -49,6 +49,7 @@ def tariff_for(session, printer_id: str | None) -> Tariff:
     return Tariff(
         price_mono=row.price_mono,
         price_color=row.price_color,
+        duplex_discount=row.duplex_discount,
         heavy_ink_from=row.heavy_ink_from,
         heavy_extra_mono=row.heavy_extra_mono,
         heavy_extra_color=row.heavy_extra_color,
@@ -94,7 +95,12 @@ def recalculate(session, order: Order, files_dir: Path) -> None:
         ) from None
 
     tariff = tariff_for(session, order.printer_id)
-    price = quote(plan.side_coverages, color=job.color.value == "color", tariff=tariff)
+    price = quote(
+        plan.side_coverages,
+        color=job.color.value == "color",
+        tariff=tariff,
+        duplex_sides=plan.duplex_sides,
+    )
 
     order.options = job.to_dict()
     order.plan = plan.to_dict()

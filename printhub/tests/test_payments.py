@@ -287,3 +287,38 @@ def _external(client, payment_id):
     with db.session_scope() as session:
         from printhub.models import Payment
         return session.get(Payment, payment_id).external_id
+
+
+class TestRelease:
+    """«Я на месте, печатать» — задание уходит на аппарат только тогда."""
+
+    def test_an_unpaid_order_cannot_be_released(self, client, confirmed):
+        """Иначе печать была бы бесплатной: достаточно не платить."""
+        headers, order_id, _ = confirmed
+        assert client.post(f"/api/orders/{order_id}/release",
+                           headers=headers).status_code == 409
+
+    def test_a_paid_order_goes_to_the_printer_on_demand(self, client, confirmed):
+        headers, order_id, _ = confirmed
+        payment = client.post(f"/api/orders/{order_id}/pay", headers=headers).json()
+        webhook(client, _external(client, payment["id"]))
+
+        response = client.post(f"/api/orders/{order_id}/release", headers=headers)
+        assert response.status_code == 200
+        assert response.json()["state"] == OrderState.QUEUED
+
+    def test_pressing_it_twice_changes_nothing(self, client, confirmed):
+        """Кнопку нажимают повторно, когда кажется, что не сработало."""
+        headers, order_id, _ = confirmed
+        payment = client.post(f"/api/orders/{order_id}/pay", headers=headers).json()
+        webhook(client, _external(client, payment["id"]))
+        first = client.post(f"/api/orders/{order_id}/release", headers=headers).json()
+        second = client.post(f"/api/orders/{order_id}/release", headers=headers).json()
+        assert first["state"] == second["state"] == OrderState.QUEUED
+
+    def test_a_stranger_cannot_start_someone_elses_printing(self, client, confirmed):
+        headers, order_id, _ = confirmed
+        payment = client.post(f"/api/orders/{order_id}/pay", headers=headers).json()
+        webhook(client, _external(client, payment["id"]))
+        assert client.post(f"/api/orders/{order_id}/release",
+                           headers=login(client, 200)).status_code == 404

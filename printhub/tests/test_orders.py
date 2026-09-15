@@ -282,3 +282,75 @@ class TestUnsupported:
         )
         assert response.status_code == 409
         assert "PDF" in response.json()["error"]
+
+
+class TestDuplexDiscount:
+    """Скидка за двустороннюю печать: бумаги уходит вдвое меньше."""
+
+    @pytest.fixture
+    def with_discount(self, client):
+        admin = login(client, 9000, "Админ")
+        client.put("/api/admin/tariffs/default", headers=admin,
+                   json={"price_mono": 60, "price_color": 200, "duplex_discount": 5,
+                         "heavy_ink_from": 0.3, "heavy_extra_mono": 0, "heavy_extra_color": 0})
+        return "point-1"
+
+    def test_one_sided_printing_gets_no_discount(self, client, printer, with_discount, make_pdf):
+        headers = login(client, 42)
+        order = order_for(client, headers, make_pdf(4), printer)
+        assert order["amount"] == 240
+
+    def test_duplex_takes_the_discount_off_every_paired_side(
+        self, client, printer, with_discount, make_pdf
+    ):
+        headers = login(client, 42)
+        order = order_for(client, headers, make_pdf(4), printer, duplex="long-edge")
+        assert order["amount"] == 228          # 240 − 5 %
+        assert any("двусторон" in line["title"] for line in order["price"]["lines"])
+
+    def test_the_odd_last_side_is_not_discounted(self, client, printer, with_discount, make_pdf):
+        """Последняя нечётная страница едет на отдельном листе и бумаги
+        не экономит — скидка ей не положена."""
+        headers = login(client, 42)
+        order = order_for(client, headers, make_pdf(3), printer, duplex="long-edge")
+        # Две стороны со скидкой, одна без: 180 − 5 % от 120.
+        assert order["amount"] == 174
+
+    def test_the_discount_line_keeps_the_receipt_honest(
+        self, client, printer, with_discount, make_pdf
+    ):
+        headers = login(client, 42)
+        order = order_for(client, headers, make_pdf(4), printer, duplex="long-edge")
+        assert sum(line["amount"] for line in order["price"]["lines"]) == order["amount"]
+
+    def test_a_discount_of_a_hundred_percent_is_refused(self, client):
+        """Сто процентов — бесплатная печать, больше — доплата клиенту."""
+        response = client.put("/api/admin/tariffs/default", headers=login(client, 9000, "Админ"),
+                              json={"price_mono": 60, "price_color": 200, "duplex_discount": 100})
+        assert response.status_code == 400
+
+
+class TestPageThumbnails:
+    def test_a_page_comes_back_as_a_picture(self, client, printer, make_pdf):
+        """Страницы выбираются галочками по картинкам, а не строкой «1-5»."""
+        headers = login(client, 42)
+        order = order_for(client, headers, make_pdf(3), printer)
+        response = client.get(f"/api/orders/{order['id']}/pages/2", headers=headers)
+        assert response.status_code == 200
+        assert response.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+    def test_the_thumbnail_shows_that_page_whatever_the_layout(
+        self, client, printer, make_pdf
+    ):
+        """Дуплекс и копии меняют раскладку листов, но третья страница
+        остаётся третьей страницей."""
+        headers = login(client, 42)
+        order = order_for(client, headers, make_pdf(4), printer,
+                          duplex="long-edge", copies=3)
+        assert client.get(f"/api/orders/{order['id']}/pages/4",
+                          headers=headers).status_code == 200
+
+    def test_a_stranger_gets_nothing(self, client, printer, make_pdf):
+        order = order_for(client, login(client, 100, "Первый"), make_pdf(2), printer)
+        response = client.get(f"/api/orders/{order['id']}/pages/1", headers=login(client, 200))
+        assert response.status_code == 404

@@ -37,6 +37,11 @@ class Tariff:
     heavy_extra_mono: int = 30
     heavy_extra_color: int = 150
 
+    #: Скидка за лист, запечатанный с двух сторон, в процентах. Бумага —
+    #: половина себестоимости, и на дуплексе её уходит вдвое меньше. Скидку
+    #: видно прямо на переключателе: это не подарок, а причина выбрать дуплекс.
+    duplex_discount: int = 0
+
     #: Минимальная сумма заказа: одна страница дешевле, чем возня с ней.
     min_order: int = 0
     currency: str = "KZT"
@@ -72,12 +77,21 @@ class Quote:
         }
 
 
-def quote(side_coverages: list[float], color: bool, tariff: Tariff) -> Quote:
+def quote(
+    side_coverages: list[float],
+    color: bool,
+    tariff: Tariff,
+    duplex_sides: int = 0,
+) -> Quote:
     """Считает стоимость по сторонам, которые реально запечатаются.
 
     side_coverages — заполнение каждой ЗАПЕЧАТАННОЙ стороны, 0..1. Чистый оборот
     листа при дуплексе сюда не попадает: он не печатается, и брать за него
     деньги было бы просто неправдой.
+
+    duplex_sides — сколько из этих сторон напечатаны на листах, занятых с обеих
+    сторон. Только они попадают под скидку: последняя нечётная страница едет на
+    отдельном листе и бумаги экономит ровно ноль.
     """
     sides = len(side_coverages)
     if sides == 0:
@@ -94,6 +108,18 @@ def quote(side_coverages: list[float], color: bool, tariff: Tariff) -> Quote:
             amount=base_price * sides,
         )
     ]
+
+    if tariff.duplex_discount and duplex_sides:
+        discount = round(base_price * duplex_sides * tariff.duplex_discount / 100)
+        if discount:
+            lines.append(
+                Line(
+                    title=f"Скидка за двустороннюю ({tariff.duplex_discount} %)",
+                    count=duplex_sides,
+                    unit_price=-round(base_price * tariff.duplex_discount / 100),
+                    amount=-discount,
+                )
+            )
 
     heavy = sum(1 for coverage in side_coverages if coverage >= tariff.heavy_ink_from)
     if heavy and extra_price:

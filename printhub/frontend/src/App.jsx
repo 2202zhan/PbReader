@@ -4,7 +4,7 @@ import { initData, isTelegram, ready } from './telegram';
 import FileList from './FileList';
 import Upload from './Upload';
 import Orders from './Orders';
-import OrderScreen from './OrderScreen';
+import OrderWizard from './OrderWizard';
 import PayScreen from './PayScreen';
 import Admin from './Admin';
 import { filesWord, pagesWord } from './format';
@@ -179,9 +179,8 @@ export default function App() {
         {payOrder ? (
           <PayScreen order={payOrder} onPaid={afterPaid} onClose={closePay} />
         ) : openOrder ? (
-          <OrderScreen
+          <OrderWizard
             order={openOrder}
-            onChange={setOpenOrder}
             onClose={() => setOpenOrder(null)}
             onConfirmed={afterConfirm}
           />

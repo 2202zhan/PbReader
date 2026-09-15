@@ -88,6 +88,7 @@ class RefundForm(BaseModel):
 class TariffForm(BaseModel):
     price_mono: int
     price_color: int
+    duplex_discount: int = 0
     heavy_ink_from: float = 0.30
     heavy_extra_mono: int = 0
     heavy_extra_color: int = 0
@@ -302,6 +303,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     **row.to_dict(),
                     "price_mono": tariffs[row.id].price_mono,
                     "price_color": tariffs[row.id].price_color,
+                    "duplex_discount": tariffs[row.id].duplex_discount,
                     "currency": tariffs[row.id].currency,
                 }
                 for row in rows
@@ -503,6 +505,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(400, "Цена не может быть отрицательной")
         if not 0 < body.heavy_ink_from <= 1:
             raise HTTPException(400, "Порог заполнения задаётся долей от 0 до 1")
+        if not 0 <= body.duplex_discount < 100:
+            # Сто процентов — это бесплатная печать, больше — доплата клиенту.
+            raise HTTPException(400, "Скидка за двустороннюю — от 0 до 99 %")
 
         printer_id = None if scope == "default" else scope
         with db.session_scope() as session:
@@ -518,6 +523,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 row = TariffRow(printer_id=printer_id)
             row.price_mono = body.price_mono
             row.price_color = body.price_color
+            row.duplex_discount = body.duplex_discount
             row.heavy_ink_from = body.heavy_ink_from
             row.heavy_extra_mono = body.heavy_extra_mono
             row.heavy_extra_color = body.heavy_extra_color
@@ -539,6 +545,70 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     {**_order_payload(session, row), "user_id": row.user_id} for row in rows
                 ]
             }
+
+    @app.get("/api/orders/{order_id}/pages/{page}")
+    def order_page(
+        order_id: str,
+        page: int,
+        width: int = 260,
+        user: User = Depends(current_user),
+    ):
+        """Миниатюра одной страницы документа — для выбора страниц галочками.
+
+        Рисуется тем же расчётом, что и лист: человек отмечает не абстрактные
+        номера, а то, что действительно выйдет из принтера.
+        """
+        from pbreader.document import PdfDocument
+
+        width = max(80, min(int(width), 600))
+        with db.session_scope() as session:
+            order = _own_order(order_id, user, session)
+            file_row = session.get(FileRow, order.file_id)
+            printer = session.get(Printer, order.printer_id) if order.printer_id else None
+            if file_row is None or file_row.deleted:
+                raise HTTPException(410, "Файл заказа удалён")
+            # Задание на одну страницу и без дуплекса: миниатюра показывает
+            # именно её, а не первый лист текущей раскладки.
+            job = jobs.build_job(
+                {**(order.options or {}), "pages": str(page), "duplex": "simplex", "copies": 1},
+                printer,
+            )
+            device = jobs.device_for(job, printer)
+            path = settings.files_dir / file_row.stored_name
+
+        if not path.is_file():
+            raise HTTPException(410, "Файл заказа удалён")
+        try:
+            with PdfDocument(path) as document:
+                preview = jobs.render(document, job, device, 1, "front", width)
+        except (IndexError, ValueError) as exc:
+            raise HTTPException(404, str(exc)) from None
+
+        return Response(
+            content=preview.png,
+            media_type="image/png",
+            headers={"Cache-Control": "private, max-age=300"},
+        )
+
+    @app.post("/api/orders/{order_id}/release")
+    def release_order(order_id: str, user: User = Depends(current_user)):
+        """«Я на месте, печатать».
+
+        Оплата и печать разнесены не из вредности: принтер стоит без присмотра,
+        и лист, вышедший в лоток, заберёт кто угодно. Поэтому задание уходит на
+        аппарат только когда человек говорит, что он рядом.
+        """
+        with db.session_scope() as session:
+            order = _own_order(order_id, user, session)
+            if order.state == OrderState.QUEUED:
+                return _order_payload(session, order)
+            if order.state != OrderState.PAID:
+                raise HTTPException(409, "Заказ ещё не оплачен")
+            order.state = OrderState.QUEUED
+            order.updated_at = now()
+            session.add(order)
+            session.flush()
+            return _order_payload(session, order)
 
     # ─── оплата ───
 
