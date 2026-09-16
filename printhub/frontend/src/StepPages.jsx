@@ -41,14 +41,11 @@ export default function StepPages({ order, busy, patch }) {
     apply(next);
   }
 
-  const landscape = (options.orientation || 'portrait') === 'landscape';
-  const copies = options.copies || 1;
-
   return (
     <>
       <div className="group-label">
         <span>{total > 1 ? `Страницы · выбрано ${selected.size} из ${total}` : 'Документ'}</span>
-        <span>шаг 2 из 3</span>
+        <span>шаг 1 из 3</span>
       </div>
 
       {/* В документе одна страница — выбирать не из чего. Сетка из одной
@@ -88,30 +85,6 @@ export default function StepPages({ order, busy, patch }) {
         </p>
       )}
 
-      <div className="field">
-        <label>
-          Разворот
-          <em>{landscape ? 'сейчас альбомный' : 'сейчас книжный'}</em>
-        </label>
-        <button type="button" className="secondary compact" disabled={busy}
-                onClick={() => patch({ orientation: landscape ? 'portrait' : 'landscape' })}>
-          Повернуть
-        </button>
-      </div>
-
-      <div className="field">
-        <label>
-          Копии
-          <em>каждой выбранной страницы</em>
-        </label>
-        <div className="stepper">
-          <button type="button" disabled={busy || copies <= 1}
-                  onClick={() => patch({ copies: copies - 1 })}>−</button>
-          <span>{copies}</span>
-          <button type="button" disabled={busy || copies >= 99}
-                  onClick={() => patch({ copies: copies + 1 })}>+</button>
-        </div>
-      </div>
     </>
   );
 }

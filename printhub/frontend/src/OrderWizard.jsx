@@ -7,7 +7,16 @@ import StepReview from './StepReview';
 import PrinterPicker from './PrinterPicker';
 import { money } from './format';
 
-const STEPS = ['Настройки печати', 'Страницы', 'Проверка'];
+/*
+ * Порядок шагов: сначала ЧТО печатаем, потом КАК и почём.
+ *
+ * Было наоборот, и это давало цену, которая менялась под рукой: на экране
+ * настроек кнопка обещала «Далее · 150 ₸», человек снимал пару страниц — и
+ * сумма падала до 120. Обещание, которое само себя отменяет через экран,
+ * хуже, чем отсутствие обещания. Поэтому на первом шаге суммы нет вовсе, а
+ * появляется она там, где уже известно, за что платить.
+ */
+const STEPS = ['Страницы', 'Настройки и цена', 'Проверка'];
 
 export default function OrderWizard({ order: initial, onClose, onConfirmed }) {
   const [order, setOrder] = useState(initial);
@@ -98,7 +107,8 @@ export default function OrderWizard({ order: initial, onClose, onConfirmed }) {
 
       {error && <div className="notice error">{error}</div>}
 
-      {step === 0 && (
+      {step === 0 && <StepPages order={order} busy={busy} patch={patch} />}
+      {step === 1 && (
         <StepOptions order={order} printer={printer} printers={printers}
                      busy={busy} patch={patch} version={version}
                      onChangePlace={() => setPicking(true)} />
@@ -112,7 +122,6 @@ export default function OrderWizard({ order: initial, onClose, onConfirmed }) {
           onClose={() => setPicking(false)}
         />
       )}
-      {step === 1 && <StepPages order={order} busy={busy} patch={patch} />}
       {step === 2 && (
         <StepReview order={order} printer={printer} sheet={sheet}
                     setSheet={setSheet} version={version} />
@@ -123,7 +132,9 @@ export default function OrderWizard({ order: initial, onClose, onConfirmed }) {
                 onClick={forward}>
           {busy
             ? 'Считаю…'
-            : `${last ? 'К оплате' : 'Далее'} · ${money(order.amount, order.currency)}`}
+            : step === 0
+              ? 'Далее'
+              : `${last ? 'К оплате' : 'Далее'} · ${money(order.amount, order.currency)}`}
         </button>
       </div>
     </>

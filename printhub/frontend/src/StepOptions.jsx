@@ -15,6 +15,8 @@ export default function StepOptions({ order, printer, printers, busy, patch, ver
   const color = options.color === 'color';
   const duplex = (options.duplex || 'simplex') !== 'simplex';
   const perSide = color ? printer?.price_color : printer?.price_mono;
+  const landscape = (options.orientation || 'portrait') === 'landscape';
+  const copies = options.copies || 1;
 
   return (
     <>
@@ -40,7 +42,7 @@ export default function StepOptions({ order, printer, printers, busy, patch, ver
 
       <div className="group-label">
         <span>Весь заказ</span>
-        <span>шаг 1 из 3</span>
+        <span>шаг 2 из 3</span>
       </div>
 
       <div className="choices">
@@ -99,6 +101,33 @@ export default function StepOptions({ order, printer, printers, busy, patch, ver
             </span>
           </span>
         </button>
+      </div>
+
+      {/* Поворот стоит под предпросмотром: только там видно, что он делает.
+          Копии — рядом с ценой: это множитель суммы, а не свойство документа. */}
+      <div className="field">
+        <label>
+          Разворот
+          <em>{landscape ? 'сейчас альбомный' : 'сейчас книжный'}</em>
+        </label>
+        <button type="button" className="secondary compact" disabled={busy}
+                onClick={() => patch({ orientation: landscape ? 'portrait' : 'landscape' })}>
+          Повернуть
+        </button>
+      </div>
+
+      <div className="field">
+        <label>
+          Копии
+          <em>всего выбранного</em>
+        </label>
+        <div className="stepper">
+          <button type="button" disabled={busy || copies <= 1}
+                  onClick={() => patch({ copies: copies - 1 })}>−</button>
+          <span>{copies}</span>
+          <button type="button" disabled={busy || copies >= 99}
+                  onClick={() => patch({ copies: copies + 1 })}>+</button>
+        </div>
       </div>
 
       {perSide > 0 && plan.printed_sides > 0 && (

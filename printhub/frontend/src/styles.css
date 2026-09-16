@@ -332,6 +332,9 @@ h2 { font-size: 16px; margin: 20px 0 8px; }
   font-size: 30px; line-height: 1;
 }
 .done-mark.ok { background: var(--good-soft); color: var(--good); }
+.done-mark.warn { background: var(--warn-soft); color: var(--warn); }
+.done-mark.bad { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+.done .receipt { text-align: left; margin: 16px 0 4px; }
 .done h1 { margin-bottom: 6px; }
 
 /* ── мастер заказа ── */

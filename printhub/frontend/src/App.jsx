@@ -7,6 +7,8 @@ import Orders from './Orders';
 import OrderWizard from './OrderWizard';
 import PayScreen from './PayScreen';
 import Admin from './Admin';
+import Rejected from './Rejected';
+import OrderOutcome from './OrderOutcome';
 import { filesWord, pagesWord } from './format';
 import { CogIcon, FolderIcon, PersonIcon, PrinterIcon, ReceiptIcon } from './icons';
 
@@ -18,6 +20,8 @@ export default function App() {
   const [printers, setPrinters] = useState([]);
   const [openOrder, setOpenOrder] = useState(null);
   const [payOrder, setPayOrder] = useState(null);
+  const [outcome, setOutcome] = useState(null);
+  const [rejected, setRejected] = useState('');
   const [error, setError] = useState('');
   const [status, setStatus] = useState('starting');
   const [uploading, setUploading] = useState(false);
@@ -93,7 +97,8 @@ export default function App() {
       );
       await print(uploaded);
     } catch (exc) {
-      setError(exc.message);
+      if (exc.status === 415 || exc.status === 409) setRejected(exc.message);
+      else setError(exc.message);
     } finally {
       setUploading(false);
       setProgress(0);
@@ -112,8 +117,8 @@ export default function App() {
       });
       setOpenOrder(order);
     } catch (exc) {
-      setError(exc.message);
-      setTab('files');
+      if (exc.status === 409 || exc.status === 415) setRejected(exc.message);
+      else setError(exc.message);
     }
   }
 
@@ -183,7 +188,18 @@ export default function App() {
   return (
     <div className="app">
       <div className="screen">
-        {payOrder ? (
+        {rejected ? (
+          <Rejected
+            reason={rejected}
+            onRetry={() => {
+              setRejected('');
+              setTab('files');
+            }}
+            onClose={() => setRejected('')}
+          />
+        ) : outcome ? (
+          <OrderOutcome order={outcome} onClose={() => setOutcome(null)} />
+        ) : payOrder ? (
           <PayScreen order={payOrder} onPaid={afterPaid} onClose={closePay} />
         ) : openOrder ? (
           <OrderWizard
@@ -241,7 +257,8 @@ export default function App() {
                   orders={orders}
                   onOpen={(order) => {
                     if (order.editable) setOpenOrder(order);
-                    else if (order.state === 'awaiting_payment') setPayOrder(order);
+                    else if (['failed', 'refunded'].includes(order.state)) setOutcome(order);
+                    else if (order.state !== 'cancelled') setPayOrder(order);
                   }}
                 />
               </>
@@ -281,7 +298,7 @@ export default function App() {
         )}
       </div>
 
-      {!openOrder && !payOrder && (
+      {!openOrder && !payOrder && !outcome && !rejected && (
         <nav className="tabs">
           {tabs.map((item) => (
             <button
