@@ -1,5 +1,5 @@
 import SheetPreview from './SheetPreview';
-import { money } from './format';
+import { money, pagesWord, sheetsWord } from './format';
 
 /**
  * Шаг 1 — то, что относится ко всему заказу.
@@ -9,7 +9,7 @@ import { money } from './format';
  * и ищет её в других местах; а узнав, что на этой точке её нет, может выбрать
  * другую.
  */
-export default function StepOptions({ order, printer, printers, busy, patch, version }) {
+export default function StepOptions({ order, printer, printers, busy, patch, version, onChangePlace }) {
   const options = order.options || {};
   const plan = order.plan || {};
   const color = options.color === 'color';
@@ -25,9 +25,7 @@ export default function StepOptions({ order, printer, printers, busy, patch, ver
           {printer?.location ? ` · ${printer.location}` : ''}
         </span>
         {printers.length > 1 && (
-          <button type="button" onClick={() => patch({}, { nextPrinter: true })}>
-            Сменить
-          </button>
+          <button type="button" onClick={onChangePlace}>Сменить</button>
         )}
       </div>
 
@@ -105,8 +103,8 @@ export default function StepOptions({ order, printer, printers, busy, patch, ver
 
       {perSide > 0 && plan.printed_sides > 0 && (
         <p className="hint small">
-          {plan.printed_sides} стор. × {money(perSide)}
-          {plan.sheet_count ? ` · ${plan.sheet_count} л. бумаги` : ''}
+          {pagesWord(plan.printed_sides)} × {money(perSide)}
+          {plan.sheet_count ? ` · ${sheetsWord(plan.sheet_count)} бумаги` : ''}
         </p>
       )}
     </>

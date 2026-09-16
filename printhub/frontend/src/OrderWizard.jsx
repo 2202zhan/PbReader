@@ -4,6 +4,7 @@ import { haptic } from './telegram';
 import StepOptions from './StepOptions';
 import StepPages from './StepPages';
 import StepReview from './StepReview';
+import PrinterPicker from './PrinterPicker';
 import { money } from './format';
 
 const STEPS = ['Настройки печати', 'Страницы', 'Проверка'];
@@ -18,6 +19,7 @@ export default function OrderWizard({ order: initial, onClose, onConfirmed }) {
   // Версия растёт на каждый пересчёт: по ней предпросмотр понимает, что лист
   // надо перерисовать, хотя номер его не менялся.
   const [version, setVersion] = useState(0);
+  const [picking, setPicking] = useState(false);
 
   useEffect(() => {
     api.printers().then((data) => setPrinters(data.printers)).catch(() => {});
@@ -30,14 +32,9 @@ export default function OrderWizard({ order: initial, onClose, onConfirmed }) {
       setBusy(true);
       setError('');
       try {
-        let printerId;
-        if (extra.nextPrinter && printers.length > 1) {
-          const index = printers.findIndex((item) => item.id === order.printer_id);
-          printerId = printers[(index + 1) % printers.length].id;
-        }
         const updated = await api.updateOrder(order.id, {
           options: changes,
-          ...(printerId ? { printer_id: printerId } : {}),
+          ...(extra.printerId ? { printer_id: extra.printerId } : {}),
         });
         setOrder(updated);
         setVersion((value) => value + 1);
@@ -48,7 +45,7 @@ export default function OrderWizard({ order: initial, onClose, onConfirmed }) {
         setBusy(false);
       }
     },
-    [order.id, order.printer_id, printers],
+    [order.id],
   );
 
   async function forward() {
@@ -68,13 +65,28 @@ export default function OrderWizard({ order: initial, onClose, onConfirmed }) {
     }
   }
 
+  async function back() {
+    if (step) {
+      setStep(step - 1);
+      return;
+    }
+    // Ушли с первого шага — заказа не случилось. Черновик удаляется, чтобы не
+    // оседать в истории записью о том, чего не было. Не получилось удалить —
+    // не беда, экран всё равно закрываем: это уборка, а не действие человека.
+    try {
+      await api.cancelOrder(order.id);
+    } catch {
+      /* пусто */
+    }
+    onClose();
+  }
+
   const last = step === STEPS.length - 1;
 
   return (
     <>
       <div className="wizard-head">
-        <button type="button" className="back"
-                onClick={() => (step ? setStep(step - 1) : onClose())}>‹</button>
+        <button type="button" className="back" onClick={back}>‹</button>
         <h1>{STEPS[step]}</h1>
       </div>
 
@@ -88,7 +100,17 @@ export default function OrderWizard({ order: initial, onClose, onConfirmed }) {
 
       {step === 0 && (
         <StepOptions order={order} printer={printer} printers={printers}
-                     busy={busy} patch={patch} version={version} />
+                     busy={busy} patch={patch} version={version}
+                     onChangePlace={() => setPicking(true)} />
+      )}
+
+      {picking && (
+        <PrinterPicker
+          printers={printers}
+          current={order.printer_id}
+          onPick={(id) => patch({}, { printerId: id })}
+          onClose={() => setPicking(false)}
+        />
       )}
       {step === 1 && <StepPages order={order} busy={busy} patch={patch} />}
       {step === 2 && (

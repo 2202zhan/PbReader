@@ -45,6 +45,13 @@ def build_job(options: dict[str, Any], printer=None) -> PrintJob:
     цветной предпросмотр и взяв цветную цену, — обман.
     """
     raw = dict(options or {})
+
+    # Содержимое доворачивается под лист само, если человек не сказал иначе.
+    # Без этого «Повернуть» меняло бы только ориентацию БУМАГИ: книжная
+    # страница на альбомном листе просто съёжилась бы в середине, и выглядело
+    # бы это как поломка, а не как поворот.
+    raw.setdefault("auto_rotate", True)
+
     if printer is not None:
         raw["paper"] = printer.paper
         raw["printer"] = printer.id

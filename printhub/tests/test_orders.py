@@ -354,3 +354,46 @@ class TestPageThumbnails:
         order = order_for(client, login(client, 100, "Первый"), make_pdf(2), printer)
         response = client.get(f"/api/orders/{order['id']}/pages/1", headers=login(client, 200))
         assert response.status_code == 404
+
+
+class TestAbandonedDrafts:
+    """Черновик — это открытый экран настроек, а не заказ."""
+
+    def test_an_abandoned_draft_leaves_no_trace(self, client, printer, make_pdf):
+        """Человек открыл файл, передумал и закрыл. Записи о несостоявшемся
+        заказе в истории быть не должно."""
+        headers = login(client, 42)
+        order = order_for(client, headers, make_pdf(1), printer)
+        assert client.delete(f"/api/orders/{order['id']}", headers=headers).status_code == 200
+        assert client.get("/api/orders", headers=headers).json()["orders"] == []
+
+    def test_a_confirmed_order_is_cancelled_but_kept(self, client, printer, make_pdf):
+        """А вот подтверждённый заказ — уже событие: его отменяют, а не стирают."""
+        headers = login(client, 42)
+        order = order_for(client, headers, make_pdf(1), printer)
+        client.post(f"/api/orders/{order['id']}/confirm", headers=headers)
+        client.delete(f"/api/orders/{order['id']}", headers=headers)
+        listed = client.get("/api/orders", headers=headers).json()["orders"]
+        assert [row["state"] for row in listed] == [OrderState.CANCELLED]
+
+    def test_a_stranger_cannot_delete_a_draft(self, client, printer, make_pdf):
+        order = order_for(client, login(client, 100, "Первый"), make_pdf(1), printer)
+        assert client.delete(f"/api/orders/{order['id']}",
+                             headers=login(client, 200)).status_code == 404
+
+
+class TestRotation:
+    def test_turning_the_sheet_turns_the_content_with_it(self, client, printer, make_pdf):
+        """Иначе книжная страница на альбомном листе просто съёжилась бы —
+        и это выглядит как поломка, а не как поворот."""
+        headers = login(client, 42)
+        order = order_for(client, headers, make_pdf(1), printer, orientation="landscape")
+        # Масштаб остаётся близким к единице: содержимое повернулось вместе
+        # с листом, а не вписалось в него боком.
+        assert order["plan"]["scale"]["percent"] > 90
+
+    def test_without_rotation_the_page_would_shrink(self, client, printer, make_pdf):
+        headers = login(client, 42)
+        order = order_for(client, headers, make_pdf(1), printer,
+                          orientation="landscape", auto_rotate=False)
+        assert order["plan"]["scale"]["percent"] < 80

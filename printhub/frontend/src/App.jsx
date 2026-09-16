@@ -24,6 +24,8 @@ export default function App() {
   const [progress, setProgress] = useState(0);
   const [busyId, setBusyId] = useState(null);
   const [health, setHealth] = useState(null);
+  // Код точки из ссылки t.me/бот?startapp=... — то есть с наклейки на аппарате.
+  const [scanned, setScanned] = useState('');
 
   const refresh = useCallback(async () => {
     const [me, fileList, orderList, printerList] = await Promise.all([
@@ -48,7 +50,9 @@ export default function App() {
 
         if (!hasToken()) {
           if (isTelegram) {
-            setToken((await api.loginTelegram(initData())).token);
+            const session = await api.loginTelegram(initData());
+            setToken(session.token);
+            if (session.start_param) setScanned(session.start_param);
           } else if (state.dev_login) {
             setToken((await api.loginDev()).token);
           } else {
@@ -99,9 +103,12 @@ export default function App() {
   async function print(file) {
     setError('');
     try {
+      // Если человек пришёл по QR с корпуса аппарата, точка уже известна —
+      // спрашивать её значит не заметить, что он стоит прямо перед ней.
+      const chosen = printers.find((item) => item.id === scanned) || printers[0];
       const order = await api.createOrder({
         file_id: file.id,
-        printer_id: printers[0]?.id || null,
+        printer_id: chosen?.id || null,
       });
       setOpenOrder(order);
     } catch (exc) {

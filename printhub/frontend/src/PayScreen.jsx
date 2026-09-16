@@ -66,8 +66,13 @@ export default function PayScreen({ order, onPaid, onClose }) {
   useEffect(() => {
     if (started.current) return;
     started.current = true;
+    // Открыть оплаченный заказ можно и из списка — например, чтобы наконец
+    // нажать «Я на месте». Выставлять счёт заново в этот момент не нужно:
+    // сервер справедливо откажет, а человек увидит ошибку на экране, где всё
+    // в порядке.
+    if (order.state === 'paid' || order.state === 'queued') return;
     issue();
-  }, [issue]);
+  }, [issue, order.state]);
 
   useEffect(() => {
     if (state === 'paid' || state === 'queued') return undefined;

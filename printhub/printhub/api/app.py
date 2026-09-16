@@ -387,6 +387,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             order = _own_order(order_id, user, session)
             if order.state not in (OrderState.DRAFT, OrderState.AWAITING_PAYMENT):
                 raise HTTPException(409, "Этот заказ уже нельзя отменить")
+            if order.state == OrderState.DRAFT:
+                # Черновик — это ещё не заказ, а открытый экран настроек. Ничего
+                # никому не обещано, денег не было. Оставлять его в истории как
+                # «отменённый» значит копить там мусор: человек открыл файл,
+                # передумал, и получил запись о несостоявшемся заказе.
+                session.delete(order)
+                return {"deleted": order_id}
             order.state = OrderState.CANCELLED
             session.add(order)
         return {"cancelled": order_id}

@@ -47,36 +47,44 @@ export default function StepPages({ order, busy, patch }) {
   return (
     <>
       <div className="group-label">
-        <span>Страницы · выбрано {selected.size} из {total}</span>
+        <span>{total > 1 ? `Страницы · выбрано ${selected.size} из ${total}` : 'Документ'}</span>
         <span>шаг 2 из 3</span>
       </div>
 
-      <div className="pages">
-        {all.map((page) => (
-          <PageThumb
-            key={page}
-            orderId={order.id}
-            page={page}
-            selected={selected.has(page)}
-            disabled={busy}
-            onToggle={() => toggle(page)}
-          />
-        ))}
-      </div>
+      {/* В документе одна страница — выбирать не из чего. Сетка из одной
+          карточки и кнопка «выбрать все» выглядели бы издевательством. */}
+      {total > 1 ? (
+        <>
+          <div className="pages">
+            {all.map((page) => (
+              <PageThumb
+                key={page}
+                orderId={order.id}
+                page={page}
+                selected={selected.has(page)}
+                disabled={busy}
+                onToggle={() => toggle(page)}
+              />
+            ))}
+          </div>
 
-      {total > 1 && (
-        <p className="hint small">
-          <button type="button" className="text-button" disabled={busy}
-                  onClick={() => apply(new Set(all))}>
-            Выбрать все
-          </button>
-          {selected.size > 1 && ' · '}
-          {selected.size > 1 && (
+          <p className="hint small">
             <button type="button" className="text-button" disabled={busy}
-                    onClick={() => apply(new Set([all[0]]))}>
-              Оставить одну
+                    onClick={() => apply(new Set(all))}>
+              Выбрать все
             </button>
-          )}
+            {selected.size > 1 && ' · '}
+            {selected.size > 1 && (
+              <button type="button" className="text-button" disabled={busy}
+                      onClick={() => apply(new Set([all[0]]))}>
+                Оставить одну
+              </button>
+            )}
+          </p>
+        </>
+      ) : (
+        <p className="hint small">
+          В документе одна страница — печатаем её.
         </p>
       )}
 
